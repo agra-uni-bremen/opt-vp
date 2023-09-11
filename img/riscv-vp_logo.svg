@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Ebene_1" data-name="Ebene 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 134.65 136.07">
+  <defs>
+    <style>
+      .cls-1 {
+        font-family: Arial-Black, Arial;
+        font-size: 32.84px;
+        font-weight: 800;
+      }
+
+      .cls-1, .cls-2 {
+        fill: #004d8e;
+      }
+
+      .cls-3 {
+        fill: #fdc62f;
+      }
+    </style>
+  </defs>
+  <text class="cls-1" transform="translate(6.62 123.19)"><tspan x="0" y="0">RISC V</tspan></text>
+  <g>
+    <path class="cls-2" d="m82.94,31.78c-.66,0-1.32.03-1.97.09h.59v.02h-24.59v56.17h24.99v-12.54c.32.02.65.03.98.03,12.09,0,21.88-9.8,21.88-21.88s-9.8-21.88-21.88-21.88Zm0,39.84c-.33,0-.65-.03-.98-.05v-36.07c.32-.02.65-.05.98-.05,9.99,0,18.08,8.1,18.08,18.08s-8.1,18.08-18.08,18.08Z"/>
+    <g>
+      <polygon class="cls-3" points="76.18 45.93 63.15 65.87 44.94 39.66 16.75 39.81 51.13 87.96 76.18 55.95 76.18 45.93"/>
+      <polygon class="cls-3" points="81.92 48.61 108.27 14.93 93.18 19.91 81.92 37.15 81.92 48.61"/>
+    </g>
+  </g>
+</svg>
