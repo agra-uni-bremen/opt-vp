@@ -1,0 +1,12 @@
+[submodule "vp/src/core/common/gdb-mc/libgdb/mpc"]
+	path = vp/src/core/common/gdb-mc/libgdb/mpc
+	url = https://github.com/orangeduck/mpc
+[submodule "vp/tests"]
+	path = vp/tests
+	url = https://github.com/agra-uni-bremen/vp-integration-tests.git
+[submodule "vp/src/platform/hwitl/virtual-bus"]
+	path = vp/src/platform/hwitl/virtual-bus
+	url = https://github.com/agra-uni-bremen/virtual-bus
+[submodule "vp/src/platform/hifive/vbb-protocol"]
+	path = vp/src/platform/hifive/vbb-protocol
+	url = https://github.com/agra-uni-bremen/virtual-breadboard-protocol.git
