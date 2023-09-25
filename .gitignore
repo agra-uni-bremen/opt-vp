@@ -7,6 +7,7 @@ vp/dependencies/systemc-dist/
 *.bin
 systemc-*
 *.asm
+.vscode/
 **/nbproject/private/
 **/nbproject/Makefile-*.mk
 **/nbproject/Package-*.bash
@@ -18,3 +19,4 @@ nbdist/
 nbproject/
 sw/basic-gcov/main.*
 sw/**/*.o
+out/

@@ -460,6 +460,7 @@ inline MemoryRegion operator&(MemoryRegion a, MemoryRegion b)
 }
 
 extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
+extern std::array<const char*, 32> regnamePrettyStr;
 
  Type getType(Mapping mapping);
 

@@ -2,13 +2,13 @@
 #define RISCV_VP_UART_H
 
 #include <stdint.h>
+#include <fd_abstract_uart.h>
 #include <systemc>
-#include "abstract_uart.h"
 
-class UART : public AbstractUART {
+class UART : public FD_ABSTRACT_UART {
 public:
 	UART(const sc_core::sc_module_name&, uint32_t);
-	~UART(void);
+	virtual ~UART(void);
 
 private:
 	typedef enum {

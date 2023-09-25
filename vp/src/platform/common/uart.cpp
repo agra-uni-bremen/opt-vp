@@ -16,7 +16,7 @@
 #define KEY_CEXIT CTRL(KEY_EXIT) /* Ctrl-x (character to exit in command mode) */
 
 UART::UART(const sc_core::sc_module_name& name, uint32_t irqsrc)
-		: AbstractUART(name, irqsrc) {
+		: FD_ABSTRACT_UART(name, irqsrc) {
 	// If stdin isn't a tty, it doesn't make much sense to poll from it.
 	// In this case, we will run the UART in write-only mode.
 	bool write_only = !isatty(STDIN_FILENO);
@@ -42,7 +42,8 @@ void UART::handle_input(int fd) {
 
 	switch (state) {
 	case STATE_NORMAL:
-		rxpush(buf);
+		if(buf != KEY_ESC)	// filter out first esc sequence
+			rxpush(buf);
 		break;
 	case STATE_COMMAND:
 		handle_cmd(buf);
@@ -73,7 +74,6 @@ void UART::handle_cmd(uint8_t cmd) {
 
 void UART::write_data(uint8_t data) {
 	ssize_t nwritten;
-
 	nwritten = write(STDOUT_FILENO, &data, sizeof(data));
 	if (nwritten == -1)
 		throw std::system_error(errno, std::generic_category());
