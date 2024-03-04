@@ -12,8 +12,6 @@
 #include "core_defs.h"
 // #include "trace.h"
 
-#define INSTRUCTION_TREE_DEPTH 50
-
 namespace Opcode {
 // opcode masks used to decode an instruction
 enum Parts {

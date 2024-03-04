@@ -7,6 +7,12 @@
 
 #include <iostream>
 #include <fstream>
+#include <algorithm>
+
+#include <dlfcn.h>
+#include <cstdlib>
+
+#include <chrono>
 
 using namespace rv32;
 
@@ -84,7 +90,7 @@ void RegFile::show() {
 	}
 }
 
-ISS::ISS(uint32_t hart_id, const char *output_filestr, std::vector<uint64_t> input_hashes, bool use_E_base_isa) : systemc_name("Core-" + std::to_string(hart_id)) {
+ISS::ISS(uint32_t hart_id, const char *output_filestr, const char *input_filestr,std::vector<uint64_t> input_hashes, bool use_E_base_isa) : systemc_name("Core-" + std::to_string(hart_id)) {
 	csrs.mhartid.reg = hart_id;
 	if (use_E_base_isa)
 		csrs.misa.select_E_base_isa();
@@ -94,6 +100,7 @@ ISS::ISS(uint32_t hart_id, const char *output_filestr, std::vector<uint64_t> inp
 
 	output_filename = output_filestr;
 	path_hashes = &input_hashes[0];
+	input_filename = input_filestr;
 
 	assert(qt >= cycle_time);
 	assert(qt % cycle_time == sc_core::SC_ZERO_TIME);
@@ -160,12 +167,23 @@ void ISS::exec_step() {
 		last_executed_steps[ring_buffer_index].last_executed_instruction = op;
 		last_executed_steps[ring_buffer_index].last_cycles = cycles_diff;
 		last_executed_steps[ring_buffer_index].last_registers = {RS1,RS2,RD};
-		last_executed_steps[ring_buffer_index].last_executed_pc = pc;
+		last_executed_steps[ring_buffer_index].last_executed_pc = last_pc;
 		last_executed_steps[ring_buffer_index].last_powermode = 0; //TODO
 		last_executed_steps[ring_buffer_index].last_memory_read = 0;
 		last_executed_steps[ring_buffer_index].last_memory_written = 0;
+		if(std::get<1>(last_memory_access)==AccessType::STORE){
+			last_executed_steps[ring_buffer_index].last_memory_written = std::get<0>(last_memory_access);
+		}else{
+			if (std::get<1>(last_memory_access)==AccessType::LOAD)
+			{
+			   last_executed_steps[ring_buffer_index].last_memory_read = std::get<0>(last_memory_access);
+			}
+			
+		}
+		last_executed_steps[ring_buffer_index].last_step_id = total_num_instr;
 	#endif
 
+	last_memory_access = {-1, AccessType::NONE};//reset last memory access
 	//updating ringbuffer done
 	//update index
 	ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
@@ -1950,6 +1968,233 @@ void ISS::run() {
 	quantum_keeper.sync();
 }
 
+struct LoadedLibrary {
+    void* handle; // Handle to the loaded library
+    std::array<ScoreFunction, SF_BATCH_SIZE> functions;
+};
+
+LoadedLibrary load_scoring_functions(const std::string& libraryPath){
+	void* library = dlmopen(-1, libraryPath.c_str(), RTLD_NOW); // | RTLD_GLOBAL
+	std::cout << "Loading library from: " << libraryPath << std::endl;
+	if (!library) {
+		std::cerr << "Error loading the library: " << dlerror() << std::endl;
+		exit(EXIT_FAILURE);
+	}
+
+	// std::array<ScoreFunction, SF_BATCH_SIZE>* (*getScoreFunctions)() = 
+	// reinterpret_cast<std::array<ScoreFunction, SF_BATCH_SIZE>* (*)()>(dlsym(library, "getScoreFunctions"));
+	// if (!getScoreFunctions) {
+	// 	std::cerr << "Error getting symbol: " << dlerror() << std::endl;
+	// 	dlclose(library);
+	// 	exit(EXIT_FAILURE);
+	// }
+
+	std::array<ScoreFunction, SF_BATCH_SIZE>* score_functions_ptr = 
+		(std::array<ScoreFunction, SF_BATCH_SIZE>*)dlsym(library, "score_functions");
+
+	if (!score_functions_ptr) {
+		std::cerr << "Error getting score_functions pointer: " << dlerror() << std::endl;
+		dlclose(library);
+		exit(EXIT_FAILURE);
+	}
+	return {library, *score_functions_ptr};
+}
+
+void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNodeR> instruction_trees){
+	std::vector<std::vector<Path>> best_sequences_for_sf; 
+	uint32_t score_function_index = 0;
+	for (auto &&score_function : score_functions)
+	{
+		std::vector<Path> tmp_best_sequences; 
+		auto _sf = score_functions[score_function_index];
+		for(InstructionNodeR& tree : instruction_trees){
+			Path p = tree.extend_path(
+				{1, 0, 1.0, 0, -1, Opcode::Mapping::UNDEF, _sf});
+			tmp_best_sequences.push_back(p);
+		}
+		best_sequences_for_sf.push_back(tmp_best_sequences);
+		std::sort(best_sequences_for_sf[score_function_index].begin(), best_sequences_for_sf[score_function_index].end(), 
+		[_sf](Path a, Path b) -> bool{
+			return a.get_score(_sf)>b.get_score(_sf);
+		});
+		score_function_index++;
+	}
+	printf("finished score function analysis\n");
+	
+	int sf_index = 0;
+	for (auto &&sequences : best_sequences_for_sf)
+	{
+		printf("\nBest sequences for score function %d:\n", sf_index);
+		for (size_t i = 0; i < std::min(3, (int)sequences.size()); i++) //print the best 3 sequences for each score function
+		{
+			sequences[i].show();
+		}
+		sf_index++;
+	}
+}
+
+void ISS::output_dot(std::streambuf *cout_save){
+	std::ofstream output;
+	if(is_single_file || !output_filename || !output_filename[0]){
+			if(output_filename && output_filename[0]){
+				std::cout << "writing to file " << output_filename << std::endl;
+				output = std::ofstream(output_filename);
+				output << "//" << std::time(0) << std::endl;
+				std::cout.rdbuf(output.rdbuf());
+			}
+
+			std::cout << "digraph g{" << std::endl;
+			//shape = record
+			std::cout << "node [shape = plaintext, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
+
+			for (InstructionNodeR& tree : instruction_trees){
+				//tree.print();
+				tree.tree_to_dot(csrs.instret.reg);
+			}
+
+			std::cout << "}" << std::endl; 
+
+			if(output_filename){ //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+
+			std::cout << std::hex;
+			for (const auto& n : memory_access_map) {
+				std::cout << n.first << " [" << std::get<0>(n.second) << " | " << std::get<1>(n.second) << "]" << std::endl;
+			}
+			std::cout << std::dec;
+
+		}else{//one dot file for each opcode output in directory
+			std::string single_output_filename = "";
+			std::cout << "writing to directory " << output_filename << std::endl;
+			//output = std::ofstream(output_filename);
+			//output << "//" << std::time(0) << std::endl;
+			//std::cout.rdbuf(output.rdbuf());
+			uint64_t index = 0;
+			for (InstructionNodeR& tree : instruction_trees){
+				index++;
+				single_output_filename = output_filename + 
+										std::string(Opcode::mappingStr[tree.instruction]) + 
+										std::string(".dot");
+				output = std::ofstream(single_output_filename);
+				output << "// " << std::time(0) << std::endl;
+				std::cout.rdbuf(output.rdbuf());
+
+				std::cout << "digraph g{" << std::endl;
+				std::cout << "node [shape = plaintext, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
+				std::cout << "edge [style=\"solid\", arrowsize = .5];" << std::endl; //don't use colorscheme greys9 for now
+
+				//tree.print();
+				tree.tree_to_dot(csrs.instret.reg);
+				std::cout << "}" << std::endl; 
+			}
+
+
+			//output memory access map
+			single_output_filename = output_filename +  std::string("memory_map.md");
+			output = std::ofstream(single_output_filename);
+			output << "// " << std::time(0) << std::endl;
+			std::cout.rdbuf(output.rdbuf());
+			
+			std::cout << std::hex;
+			for (const auto& n : memory_access_map) {
+				std::cout << n.first << " [" << std::get<0>(n.second) << " | " << std::get<1>(n.second) << "]" << std::endl;
+			}
+			std::cout << std::dec;
+
+
+			if(output_filename){ //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		}
+}
+
+void ISS::output_json(std::streambuf *cout_save, 
+		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists){
+	std::ofstream output;
+	nlohmann::json top_level_json;
+		int idx = 0;
+		for (auto &&seq : discovered_sequences_node_list)
+		{
+			nlohmann::json path_node_json_array = nlohmann::json::array();
+			printf("Converting Full Path [%d] to JSON\n", idx);
+			for (auto &&node : seq)
+			{
+				nlohmann::json path_node_json = node.to_json();	
+				path_node_json_array.push_back(path_node_json);
+
+			}
+			std::string key = "Sequence" + std::to_string(idx);
+			top_level_json[key] = path_node_json_array;
+
+
+			int sub_idx = 0;
+			for (auto &&sub_seq : discovered_sub_sequences_node_lists.at(idx))
+			{
+				nlohmann::json sub_sequence_json_array = nlohmann::json::array();
+				for (auto &&node : sub_seq)
+				{
+					nlohmann::json path_node_json = node.to_json();	
+					sub_sequence_json_array.push_back(path_node_json);
+
+				}
+				std::string sub_sequence_key = key + "-" + std::to_string(sub_idx);
+				top_level_json[sub_sequence_key] = sub_sequence_json_array;
+				sub_idx++;
+			}
+			int variant_idx = 0;
+			for (auto &&variant_seq : discovered_variant_sequences_node_lists.at(idx))
+			{
+				nlohmann::json variant_sequence_json_array = nlohmann::json::array();
+				for (auto &&node : variant_seq)
+				{
+					nlohmann::json path_node_json = node.to_json();	
+					variant_sequence_json_array.push_back(path_node_json);
+
+				}
+				std::string variant_sequence_key = key + "v" + std::to_string(variant_idx);
+				top_level_json[variant_sequence_key] = variant_sequence_json_array;
+				variant_idx++;
+			}
+			idx++;
+		}
+
+
+		//save or print json
+		if(!output_filename || !output_filename[0]){
+			
+			std::cout << top_level_json.dump(4) << std::endl;
+
+		}else{
+			std::string single_output_filename = "";
+			std::cout << "writing json to directory " << output_filename << std::endl;
+
+			std::string file_path = std::string(input_filename);
+			std::string application_name = file_path.substr(file_path.find_last_of("\//")+1);
+
+			single_output_filename = output_filename + 
+									std::string("sequences_") + 
+									application_name + 
+									std::string(".json");
+			std::cout << "Sequence file: " << single_output_filename << std::endl;
+			output = std::ofstream(single_output_filename);
+			std::cout.rdbuf(output.rdbuf());
+
+			std::cout << top_level_json.dump(4) << std::endl;
+
+
+
+			if(output_filename){ //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		}
+}
+
 void ISS::show() {
 	boost::io::ios_flags_saver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
@@ -1961,110 +2206,133 @@ void ISS::show() {
 	std::cout << "execution statistics: (" << instruction_trees.size() << ")" << std::endl;
 
 	//std::ostream output = std::cout;
-	std::ofstream output;
 	std::streambuf *cout_save = std::cout.rdbuf();
 
-	bool is_single_file = false;
-
-	if(is_single_file || !output_filename || !output_filename[0]){
-		if(output_filename && output_filename[0]){
-			std::cout << "writing to file " << output_filename << std::endl;
-			output = std::ofstream(output_filename);
-			output << "//" << std::time(0) << std::endl;
-			std::cout.rdbuf(output.rdbuf());
-		}
-
-		std::cout << "digraph g{" << std::endl;
-		//shape = record
-		std::cout << "node [shape = plaintext, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
-
-		for (InstructionNodeR& tree : instruction_trees){
-			//tree.print();
-			tree.tree_to_dot(csrs.instret.reg);
-		}
-
-		std::cout << "}" << std::endl; 
-
-		if(output_filename){ //reset cout
-			std::cout.rdbuf(cout_save);
-			std::cout << "restored cout" << std::endl;
-		}
-
-		std::cout << std::hex;
-		for (const auto& n : memory_access_map) {
-			std::cout << n.first << " [" << std::get<0>(n.second) << " | " << std::get<1>(n.second) << "]" << std::endl;
-		}
-		std::cout << std::dec;
-
-	}else{//one dot file for each opcode output in directory
-		std::string single_output_filename = "";
-		std::cout << "writing to directory " << output_filename << std::endl;
-		//output = std::ofstream(output_filename);
-		//output << "//" << std::time(0) << std::endl;
-		//std::cout.rdbuf(output.rdbuf());
-		uint64_t index = 0;
-		for (InstructionNodeR& tree : instruction_trees){
-			index++;
-			single_output_filename = output_filename + 
-									std::string(Opcode::mappingStr[tree.instruction]) + 
-									std::string(".dot");
-			output = std::ofstream(single_output_filename);
-			output << "// " << std::time(0) << std::endl;
-			std::cout.rdbuf(output.rdbuf());
-
-			std::cout << "digraph g{" << std::endl;
-			std::cout << "node [shape = plaintext, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
-			std::cout << "edge [style=\"solid\", arrowsize = .5];" << std::endl; //don't use colorscheme greys9 for now
-
-			//tree.print();
-			tree.tree_to_dot(csrs.instret.reg);
-			std::cout << "}" << std::endl; 
-		}
-
-
-		//output memory access map
-		single_output_filename = output_filename +  std::string("memory_map.md");
-		output = std::ofstream(single_output_filename);
-		output << "// " << std::time(0) << std::endl;
-		std::cout.rdbuf(output.rdbuf());
-		
-		std::cout << std::hex;
-		for (const auto& n : memory_access_map) {
-			std::cout << n.first << " [" << std::get<0>(n.second) << " | " << std::get<1>(n.second) << "]" << std::endl;
-		}
-		std::cout << std::dec;
-
-
-		if(output_filename){ //reset cout
-			std::cout.rdbuf(cout_save);
-			std::cout << "restored cout" << std::endl;
-		}
+	if(output_as_dot){
+		output_dot(cout_save);
 	}
 
 	//find best instruction squence for each tree
-	std::vector<Path> discovered_paths; 
+	std::vector<Path> discovered_sequences; 
+	std::vector<std::vector<Path>> discovered_sub_sequences;  //TODO currently not used
 	int i = 0;
+	printf("start analysis\n");
+	std::vector<Path> tmp_discovered_sub_sequences; 
+	auto sf = [](ScoreParams p) -> float {
+		float score = (p.length * p.weight) * p.score_multiplier 
+			+ p.weight * p.score_bonus; //length * minimum_weight;
+		return score;
+	};
 	for (InstructionNodeR& tree : instruction_trees){
-		Path p = tree.extend_path(1, 0, 1.0, i);
-		discovered_paths.push_back(p);
+		Path p = tree.extend_path({1, 0, 1.0, i, -1, Opcode::Mapping::UNDEF, sf});
+		discovered_sequences.push_back(p);
 		i++;
 	}
+	printf("analyzed all trees\n");
 
 	//sort discovered paths to print most relevant ones last
-	std::sort(discovered_paths.begin(), discovered_paths.end(), 
-	[](Path a, Path b) -> bool{
-		return a.get_score()<b.get_score();
+	// std::function<float(ScoreParams)> score_func = sf;
+	std::sort(discovered_sequences.begin(), discovered_sequences.end(), 
+	[sf](Path a, Path b) -> bool{
+		return a.get_score(sf)<b.get_score(sf);
 	});
 
-	for (auto &&p : discovered_paths)
+	std::vector<std::vector<PathNode>> discovered_sequences_node_list;
+	std::vector<std::vector<BranchingPoint>> discovered_variant_starting_points;
+	std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists;
+	std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists;
+
+	for (auto &&p : discovered_sequences)
 	{
+
+		//find matching tree for path //maybe just store a reference in path?
+		InstructionNodeR* found_tree = NULL;
+		for (InstructionNodeR& root : instruction_trees){
+			
+			if(root.instruction == p.opcodes[0]){
+				found_tree = &root;
+				break;
+			}
+		}
+		if(found_tree==NULL){ //this should never happen, as there has to exist a tree to find a path in the first place
+			printf("[ERROR] Could not find matching tree for discovered path\nOpcode: %s\n", Opcode::mappingStr[p.opcodes[0]]);
+		}
+
+		std::vector<PathNode> full_path;
+		full_path = found_tree->path_to_path_nodes(p, 0);
+		std::vector<BranchingPoint> variant_starting_points = found_tree->find_variant_branch(p, 0);
+		//sort variant starting points, so we can extend the top N
+		std::sort(variant_starting_points.begin(), variant_starting_points.end(), 
+		[](BranchingPoint a, BranchingPoint b) -> bool{
+			return a.ratio>b.ratio;
+		});
+
+		for (auto &&v : variant_starting_points)
+		{
+			printf("Variant Branching Point: %s at %d, with ratio %.4f\n", Opcode::mappingStr[v.instruction], v.depth, v.ratio);
+		}
+		
+
+		discovered_sequences_node_list.push_back(full_path);
+		discovered_variant_starting_points.push_back(variant_starting_points);
+
+		//force extend to top N variant starting points
+		std::vector<Path> tmp_discovered_variants; 
+		uint8_t max_variants = !(variant_starting_points.size()<MAX_VARIANTS)?MAX_VARIANTS:variant_starting_points.size();
+		for (int32_t i = 0; i < max_variants; i++)
+		{
+			//convert to Path first (up to new branching point and then force extension)
+			Path tmp_variant = found_tree->extend_path({1, 0, 1.0, i, variant_starting_points[i].depth, 
+									variant_starting_points[i].instruction, sf});
+			tmp_discovered_variants.push_back(tmp_variant);
+		}
+		
+		printf("-------------------------------------------\n");
 		p.show();	
+
+		tmp_discovered_sub_sequences = p.end_of_sequence->force_path_extension(p, sf);
+		
+		printf("last Node in sequence should be %s\n", Opcode::mappingStr[p.end_of_sequence->instruction]);
+		printf("-------------------------------------------\n");
+		printf("Sub Sequences (%d)\n[\n",tmp_discovered_sub_sequences.size());
+
+		std::vector<std::vector<PathNode>> tmp_node_list;
+		for (auto &&subseq : tmp_discovered_sub_sequences)
+		{
+			printf(" - Sub Sequence:\n");
+			subseq.show(" - ");
+			printf(" - ,\n");
+			tmp_node_list.push_back(found_tree->path_to_path_nodes(subseq, 0));
+		}
+		discovered_sub_sequences_node_lists.push_back(tmp_node_list);
+		discovered_sub_sequences.push_back(tmp_discovered_sub_sequences);
+
+		//convert variants to path nodes
+		std::vector<std::vector<PathNode>> tmp_variant_node_list;
+		for (auto &&variant : tmp_discovered_variants)
+		{
+			printf(" - Variant Sequence:\n");
+			variant.show(" - ");
+			printf(" - ,\n");
+			tmp_variant_node_list.push_back(found_tree->path_to_path_nodes(variant, 0));
+		}
+		discovered_variant_sequences_node_lists.push_back(tmp_variant_node_list);
+		printf("]\n-------------------------------------discovered_sequences_node_list------\n");
 	}
 
-	float total_percent = (float)discovered_paths.back().minimum_weight * (float)discovered_paths.back().length / (float)csrs.instret.reg;
-	std::cout << "inverse dependency score " << discovered_paths.back().inverse_dependency_score << std::endl;
-	std::cout << "partially normalized potential " << discovered_paths.back().get_normalized_score() << std::endl;
-	std::cout << "normalized potential " << discovered_paths.back().get_normalized_score() * total_percent * 100 << std::endl;
+	if(output_as_json){
+		output_json(cout_save, discovered_sequences_node_list, 
+			discovered_sub_sequences_node_lists, 
+			discovered_variant_sequences_node_lists);
+	}
+
+	
+	//print some additional info
+
+	float total_percent = (float)discovered_sequences.back().minimum_weight * (float)discovered_sequences.back().length / (float)csrs.instret.reg;
+	std::cout << "inverse dependency score " << discovered_sequences.back().inverse_dependency_score << std::endl;
+	std::cout << "partially normalized potential " << discovered_sequences.back().get_normalized_score() << std::endl;
+	std::cout << "normalized potential " << discovered_sequences.back().get_normalized_score() * total_percent * 100 << std::endl;
 
 	std::list<Opcode::Mapping> unused_instructions; 
 	for (size_t i = Opcode::Mapping::ADD; i < Opcode::Mapping::NUMBER_OF_INSTRUCTIONS; i++)
@@ -2082,23 +2350,131 @@ void ISS::show() {
 	}
 	std::cout << "\n[Unused Instructions]" << std::endl;
 	if(unused_instructions.size()>0){
-		for (auto &&unused_ins : unused_instructions)
-		{
-			//std::cout << Opcode::mappingStr[unused_ins] << std::endl;
-		}
+		// for (auto &&unused_ins : unused_instructions)
+		// {
+		// 	std::cout << Opcode::mappingStr[unused_ins] << std::endl;
+		// }
 		std::cout << unused_instructions.size() << std::endl;
 	}else{
 		std::cout << "- NONE -" << std::endl;
 	}
+
+
+	//evaluate additional score functions
+	LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
+	std::array<ScoreFunction, SF_BATCH_SIZE> score_functions = sf_lib.functions;
 	
+
+    // Access the score_functions array and call the functions
+	std::cout << "Testing loaded score functions: " << std::endl;
+    for (const auto& func : score_functions) {
+        std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
+    }
+
+	// {
+    //     [](ScoreParams p) -> float {
+	// 		float score = ((p.length * p.weight) * p.score_multiplier 
+	// 			+ p.weight * p.score_bonus); //length * minimum_weight;
+	// 		return score;
+	// 	},
+    //     [](ScoreParams p) -> float {
+	// 		float score = ((p.length * p.weight) * p.score_multiplier 
+	// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
+	// 		return score;
+	// 	},
+    //     [](ScoreParams p) -> float {
+	// 		float score = ((p.length * p.weight) * p.score_multiplier 
+	// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
+	// 		return score;
+	// 	}
+    // };
+
+
+	if(interactive_mode){
+		printf("start score function analysis\n");
+		int run_id = 0;
+
+		while (true) {
+			std::cout << "Testing loaded score functions: " << std::endl;
+			for (const auto& func : score_functions) {
+				std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
+			}
+			std::cout << "\nEnter \n" 
+						<< "\t'a' to run tree analysis\n"
+						<< "\t'r' to reload the library\n" 
+						<< "\t'p [% threshold]' to prune trees\n" 
+						<< "\t'd' to export as dot\n" 
+						<< "\t'q' to quit\n" 
+						<< ":"<< std::endl;
+			std::string userInput; 
+			std::cin >> userInput;
+			char mode = userInput[0];
+
+			if (mode == 'r') {
+				// Reload the library and get the updated array of functions
+				dlclose(sf_lib.handle);
+				std::string library_path = 
+						"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
+				sf_lib = load_scoring_functions(library_path);
+				score_functions = sf_lib.functions;
+				run_id++;
+			} 
+			else if(mode == 'a'){ //run analysis
+				using std::chrono::high_resolution_clock;
+				using std::chrono::duration;
+				using std::chrono::milliseconds;
+
+				auto time_analysis1 = high_resolution_clock::now();
+				for (size_t i = 0; i < 100; i++)
+				{
+					analyze_trees(score_functions, instruction_trees);
+				}
+				auto time_analysis2 = high_resolution_clock::now();
+				duration<double, std::milli> ms_double = time_analysis2 - time_analysis1;
+
+				std::cout << "Analysis of 300  SF took " << ms_double.count() << "ms\n" 
+					<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
+			} 
+			else if (mode == 'q') {
+				dlclose(sf_lib.handle);
+				break;
+			} 
+			else if (mode == 'p') {
+				float prune_threshold = PRUNE_THRESHOLD_WEIGHT;
+				if(userInput.length() > 1){
+					try {
+						prune_threshold = std::stof(userInput.substr(1))/100.0;
+						std::cout << "Start pruning trees with threshold " << prune_threshold << std::endl;
+					} catch (const std::invalid_argument& e) {
+						std::cout << "No valid threshold specified. Set to default (" << PRUNE_THRESHOLD_WEIGHT << ")" << std::endl;
+					}
+				}
+				for (auto &&tree : instruction_trees)
+				{
+					printf("\tPruning with absolute threshold: %f\n", tree.weight * prune_threshold);
+					tree.prune_tree(tree.weight * prune_threshold, 0);	
+				}
+			} 
+			else if (mode == 'd') {
+				printf("exporting trees to dot\n");
+				std::streambuf *cout_save = std::cout.rdbuf();
+				output_dot(cout_save);
+			} 
+			else {
+				std::cout << "Invalid input." << std::endl;
+			}
+		}
+	}
 	
+	//close library
+	dlclose(sf_lib.handle);
 
 	std::cout << "total instructions: " << csrs.instret.reg << "(" << total_num_instr << ")" << " [" << total_percent*100 << "]" << std::endl;
 	std::cout << "total cycles: " << _compute_and_get_current_cycles() << std::endl;
 
-	std::cout << "$ " << Opcode::mappingStr[discovered_paths.back().opcodes[0]] 
-	<< " & " << discovered_paths.back().length 
-	<< " & " << discovered_paths.back().minimum_weight
+	std::cout << "$ " << Opcode::mappingStr[discovered_sequences.back().opcodes[0]] 
+	<< " & " << discovered_sequences.back().length 
+	<< " & " << discovered_sequences.back().minimum_weight
 	<< " & " << csrs.instret.reg << "K[" << total_percent*100 << "]"
-	<< " & " << discovered_paths.back().get_normalized_score() << std::endl;
+	<< " & " << discovered_sequences.back().get_normalized_score() << std::endl;
 }

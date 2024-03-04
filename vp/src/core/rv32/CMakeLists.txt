@@ -5,7 +5,7 @@ add_library(rv32
 		syscall.cpp
         ${HEADERS})
 
-target_link_libraries(rv32 systemc core-common softfloat)
+target_link_libraries(rv32 systemc core-common softfloat dl)
 
 
 if(COLOR_THEME STREQUAL "LIGHT")

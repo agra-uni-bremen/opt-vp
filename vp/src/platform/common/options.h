@@ -15,6 +15,10 @@ public:
 
 	std::vector<uint64_t> input_hash_list;
 	float reduce_graph_output = 0.0;
+	bool output_as_dot = false;
+	bool output_as_json = false;
+	bool output_as_csv = false;
+	bool interactive_mode = false;
 
 	bool intercept_syscalls = false;
 	bool error_on_zero_traphandler = false;

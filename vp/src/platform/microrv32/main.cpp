@@ -71,7 +71,7 @@ int sc_main(int argc, char **argv) {
 
 	tlm::tlm_global_quantum::instance().set(sc_core::sc_time(opt.tlm_global_quantum, sc_core::SC_NS));
 
-	ISS core(0,opt.output_file.c_str(), opt.input_hash_list, opt.use_E_base_isa);
+	ISS core(0,opt.output_file.c_str(), opt.input_program.c_str(),opt.input_hash_list, opt.use_E_base_isa);
 	SimpleMemory mem("SimpleMemory", opt.mem_size);
 	ELFLoader loader(opt.input_program.c_str());
 	SimpleBus<2, 6> bus("SimpleBus");
@@ -108,6 +108,10 @@ int sc_main(int argc, char **argv) {
 
 	if (opt.intercept_syscalls)
 		core.sys = &sys;
+
+	core.output_as_dot = opt.output_as_dot;
+	core.output_as_csv = opt.output_as_csv;
+	core.output_as_json = opt.output_as_json;
 
 	// address mapping
 	bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

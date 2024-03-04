@@ -169,6 +169,12 @@ struct PendingInterrupts {
 	uint32_t pending;
 };
 
+enum class AccessType {
+	NONE=-1,
+	LOAD=0,
+	STORE=1
+};
+
 struct ISS : public external_interrupt_target, public clint_interrupt_target, public iss_syscall_if, public debug_target_if {
 	clint_if *clint = nullptr;
 	instr_memory_if *instr_mem = nullptr;
@@ -186,6 +192,12 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	PrivilegeLevel prv = MachineMode;
 	int64_t lr_sc_counter = 0;
 	uint64_t total_num_instr = 0;
+
+	bool is_single_file = false;
+	bool output_as_dot = false;
+	bool output_as_csv = false;
+	bool output_as_json = false;
+	bool interactive_mode = false;
 
 	// last decoded and executed instruction and opcode
 	Instruction instr;
@@ -210,6 +222,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	uint64_t prev_cycles = 0;
 
 	std::map<uint64_t, std::tuple<uint64_t,uint64_t>> memory_access_map; //map mem -> write_access | load_access
+	std::tuple<uint64_t, AccessType> last_memory_access = {-1, AccessType::NONE}; //address, is_store = 1 is_load = 0 no_memory_access=-1
 
 	uint8_t ring_buffer_index =  0;
 	CoreExecStatus status = CoreExecStatus::Runnable;
@@ -218,6 +231,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	const char* output_filename;
 	uint64_t *path_hashes;
+	const char* input_filename;
 
 	sc_core::sc_event wfi_event;
 
@@ -230,7 +244,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	static constexpr int32_t REG_MIN = INT32_MIN;
     static constexpr unsigned xlen = 32;
 
-	ISS(uint32_t hart_id, const char *output_filename = "", std::vector<uint64_t> input_hashes = {}, bool use_E_base_isa = false);
+	ISS(uint32_t hart_id, const char *output_filename = "", const char *input_filename = "", std::vector<uint64_t> input_hashes = {}, bool use_E_base_isa = false);
 
 	void exec_step();
 
@@ -314,10 +328,12 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	inline void log_memory_store(uint64_t address, uint64_t apc){
 		//update entry and invalidate last load
 		memory_access_map[address] = {apc, 0};
+		last_memory_access = {address, AccessType::STORE};
 	}
 	inline void log_memory_read(uint64_t address, uint64_t apc){
 		//update entry and keep last write
 		std::get<1>(memory_access_map[address]) = apc;
+		last_memory_access = {address, AccessType::LOAD};
 	}
 
 	inline void execute_amo(Instruction &instr, std::function<int32_t(int32_t, int32_t)> operation) {
@@ -371,6 +387,13 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	void run_step() override;
 
 	void run() override;
+
+	void output_dot(std::streambuf *cout_save);
+	//void output_csv(std::streambuf *cout_save);
+	void output_json(std::streambuf *cout_save, 
+		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists);
 
 	void show();
 };

@@ -1,15 +1,47 @@
-#ifndef RISCV_ISA_TRACE_H
-#define RISCV_ISA_TRACE_H
+#pragma once
 
 #include "instr.h"
+#include <set>
+#include <bitset>
+
+#include "lib/json/single_include/nlohmann/json.hpp"
 
 #define INSTRUCTION_TREE_DEPTH 50
 
+//TODO use options instead of defines
+#define MAX_VARIANTS 3
+#define SF_BATCH_SIZE 3
+#define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
+//no pruning md5 d50 -> 0.356s per function for all trees
+//threshold of 0.03 d50 -> 0.0233s
+//threshold of 0.01 d50 -> 0.0533s 
 
+#define O_STARTUP 1000
+#define O_BEGINNING 10000
+#define O_MID 3000000
+//#define O_END
+
+#define trace_pcs  
+#define log_pcs
+//#define debug_register_dependencies
 
 // extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
 
 // Opcode::Type getType(Opcode::Mapping mapping);
+
+enum class InstructionType {
+	UNKNOWN = 0,
+	Arithmetic,
+	Logic,
+	Load_Store,
+	Branch,
+	LUI,
+	Jump,
+	Float_Compare,
+	Float_R4,
+};
+
+InstructionType getInstructionType(Opcode::Mapping mapping);
 
 struct ExecutionInfo {
 	Opcode::Mapping last_executed_instruction;
@@ -21,7 +53,55 @@ struct ExecutionInfo {
 
 	uint64_t last_memory_read;
 	uint64_t last_memory_written;
+
+	uint64_t last_step_id;
 };
+
+struct StepInsertInfo {
+    Opcode::Mapping op;
+    uint64_t pc;
+    int8_t true_dependency1;
+    int8_t true_dependency2;
+    std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
+    std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
+    int8_t input1;
+    int8_t input2;
+    int8_t output;
+    uint32_t depth;
+    uint64_t step;
+	uint64_t cycles;
+};
+
+struct ScoreParams {
+	Opcode::Mapping instr; 
+	Opcode::Mapping tree; 
+	uint64_t weight; 
+	uint32_t length; 
+	float dep_score;
+	int32_t num_children;
+	int32_t inputs;
+	int32_t outputs; 
+	float score_multiplier; 
+	float score_bonus; 
+// uint32_t num_pcs;
+};
+
+using ScoreFunction = std::function<float(ScoreParams)>;
+
+struct StepUpdateInfo {
+    int8_t dependency1;
+    int8_t dependency2;
+    std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
+    std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
+    int8_t input1;
+    int8_t input2;
+	int8_t output;
+    uint64_t pc;
+    uint64_t step;
+	uint64_t cycles;
+};
+
+class InstructionNode;
 
 struct Path
 {
@@ -33,22 +113,44 @@ struct Path
 	double inverse_dependency_score = 0.0;
 	std::vector<uint64_t> path_hashes;
 	std::vector<Opcode::Mapping> opcodes;
+	InstructionNode* end_of_sequence;
 
-	float get_score(){
-		return length * minimum_weight * score_multiplier 
-				+ minimum_weight * score_bonus; //length * minimum_weight;
+	//double score = 0; //TODO should this be saved here? How should we handle initialization?
+
+	float get_score(std::function <float(ScoreParams)> score_function){
+		uint32_t num_children = 0; //TODO end_of_sequence test for type and count children  
+		uint32_t inputs = 0; //TODO
+		uint32_t outputs = 0; //TODO 
+		ScoreParams params = {opcodes.back(), opcodes[0], 
+		minimum_weight, length, inverse_dependency_score, 
+		num_children, inputs, outputs, score_multiplier, score_bonus};
+		return score_function(params);
+		// length * minimum_weight * score_multiplier 
+		// 		+ minimum_weight * score_bonus; //length * minimum_weight;
 	}
 	float get_normalized_score(){
 		return length / (1.0 + inverse_dependency_score);
 	}
 
 	void show(){
-		std::cout << "[Path]\n";
-		std::cout << "Length: " << length << "\n";
-		std::cout << "Weight: " << minimum_weight << "\n";
-		std::cout << "Score:  " << get_score() << "\n";
+		show("");
+	}
+	void show(const char* prefix){
+		auto sf = [](const ScoreParams p) {
+			float score = (p.length * p.weight) * p.score_multiplier 
+				+ p.weight * p.score_bonus; //length * minimum_weight;
+			return score;
+		};
+		show(prefix, sf);
+	}
 
-		std::cout << "<Opcodes>\n";
+	void show(const char* prefix, std::function <float(const ScoreParams)> score_function){
+		std::cout << prefix << "[Sequence]\n";
+		std::cout << prefix << "Length: " << length << "\n";
+		std::cout << prefix << "Weight: " << minimum_weight << "\n";
+		std::cout << prefix << "Score:  " << get_score(score_function) << "\n";
+
+		std::cout << prefix << "<Opcodes>\n" << prefix;
 		for (auto &&opcode : opcodes)
 		{
 			const char* opcode_string = "UNKWN ";
@@ -62,15 +164,64 @@ struct Path
 		std::cout << std::endl;
 
 
-		std::cout << "Last Path Hash: " << path_hashes.back() << "\n";
+		std::cout << prefix << "Last Path Hash: " << path_hashes.back() << std::endl;
 		// std::cout << "<Path Hashes>\n";
 		// for (auto &&hash : path_hashes)	
 		// {
 		// 	std::cout << hash << " --> ";
 
 		// }
-		std::cout << "\n\n";
+		// std::cout << "\n\n";
 	}
+};
+
+
+//used to represent a node in an identified path/sequence
+//used for exporting identified sequences 
+struct PathNode {
+    Opcode::Mapping instruction;
+    uint64_t weight;
+
+	//uint64_t cycles;
+    //uint64_t subtree_hash;
+	float score_bonus;
+	float score_multiplier;
+	float inverse_dependency_score;
+
+	//usually only for leaf nodes, but we can calculate this from following all branches from the current node
+	std::map<uint64_t, int> program_counters;
+
+	std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
+	std::set<int8_t> anti_dependencies;
+	std::set<int8_t> output_dependencies;
+
+	//also save registers?
+
+    // Constructor to initialize from an InstructionNode
+    PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, 
+				std::map<uint64_t, int> pcs, std::array<bool, 
+				INSTRUCTION_TREE_DEPTH> dep_true, std::set<int8_t> dep_out, std::set<int8_t> dep_anti);
+
+	nlohmann::json to_json();
+};
+
+struct PathExtensionParams {
+    uint32_t length;
+    float score_bonus;
+    float score_multiplier;
+    int32_t tree_id;
+    int force_extension_depth;
+    Opcode::Mapping force_instruction;
+	std::function <float(const ScoreParams)> score_function;
+};
+
+struct BranchingPoint
+{
+	uint8_t depth = 0;
+	Opcode::Mapping instruction = Opcode::UNDEF;
+	uint64_t weight = 0;
+	double ratio = 0.0;
+	InstructionNode* starting_point;
 };
 
 class InstructionNode{
@@ -80,11 +231,11 @@ class InstructionNode{
 		}
 
 		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash)
-				: instruction(instruction), weight(1){
-					subtree_hash = (parent_hash << 6) + instruction;
+				: instruction(instruction), weight(0){
+					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
 					for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
 					{
-						dependencies[i] = false;
+						dependencies_true_[i] = false;
 					}
 					
 		}
@@ -93,19 +244,27 @@ class InstructionNode{
 		//the number of times this node occurred
 		uint64_t weight;
 
-		uint64_t total_cycles;
+		uint64_t total_cycles = 0;
 		//sum of the step ids this node occurred in
 		//dividing by weight results in the average region of the programs lifetime this node occurs most frequently
-		uint64_t sum_step_ids;
+		//uint64_t sum_step_ids = 0;
+		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
 		//array of negative offsets to last node that writes to rs1 or rs2 (1=this node depends on tree[current-index])
 		//very likely this only marks 2 values for longer (unique) paths
-		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies; //value at offset 0 is ignored
+		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_; //value at offset 0 is ignored
+		//index of other nodes this node has a anti/output dependency to
+		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
+		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_output_;
+
+		std::bitset<32> inputs_;
+		std::bitset<32> outputs_;
 
 		uint64_t subtree_hash = 0;
 
-		virtual InstructionNode* insert(Opcode::Mapping op, uint64_t pc, 
-								int8_t dependency1, int8_t dependency2, int8_t relative_overwrite, 
-								uint8_t depth) = 0;
+		//additional metrics
+
+
+		virtual InstructionNode* insert(const StepInsertInfo& p) = 0;
 
 		virtual float get_score_bonus(){
 			using namespace Opcode;
@@ -131,7 +290,7 @@ class InstructionNode{
 			uint64_t dependencies_count = 0;
 			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
 			{
-			if(dependencies[i]){
+			if(dependencies_true_[i]){
 				dependencies_count++;
 			}
 			}
@@ -198,14 +357,31 @@ class InstructionNode{
 			//TODO: include depth so we do not have to iterate over unnecessary empty entries
 			for (size_t i = 1; i < INSTRUCTION_TREE_DEPTH; i++)
 			{
-			if(dependencies[i]){
+			if(dependencies_true_[i]){
 				result += 1/(double)i; //i should never be 0 as a node does not depend on itself
+			}
+			if(dependencies_output_[i]){
+				result += 1/(double)i;
+			}
+			if(dependencies_anti_[i]){
+				result += 1/(double)i;
 			}
 			}
 
 				return result;
 				break;
 			}
+		}
+
+		uint32_t count_true_dependencies(){
+			uint32_t result = 0;
+			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
+			{
+			if(dependencies_true_[i]){
+				result++;
+			}
+			}
+			return result;
 		}
 
 		void print(){
@@ -248,6 +424,8 @@ class InstructionNode{
 			std::cout << dot_stream.str() << std::endl;
 		}
 
+		virtual std::map<uint64_t, int> get_pc() = 0;
+
 		virtual std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
@@ -265,21 +443,44 @@ class InstructionNode{
 			return 1.0;
 		}
 		//dependencies should be 0 if not applicable
-		void update_weight(int8_t dependency1, int8_t dependency2,  int8_t overwrite, uint64_t pc){
+		virtual void update_weight(const StepUpdateInfo& p){
 			weight++; 
-			sum_step_ids += 1; //TODO add curent step
-			if(dependency1>0){
-				dependencies[dependency1] = true;
+			total_cycles += p.cycles;
+			//sum_step_ids += p.step; //TODO add curent step
+			if(p.step > O_MID){
+				occurrence[3]++;
+			}else if(p.step > O_BEGINNING){
+				occurrence[2]++;
+			}else if(p.step > O_STARTUP){
+				occurrence[1]++;
+			}else{
+				occurrence[0]++;
 			}
-			if(dependency2>0){
-				dependencies[dependency2] = true;
+			if(p.dependency1>0){
+				dependencies_true_[p.dependency1] = true;
+			}else if(p.input1>=0){
+				inputs_.set(p.input1, true);
 			}
+			if(p.dependency2>0){
+				dependencies_true_[p.dependency2] = true;
+			}else if(p.input2>=0){
+				inputs_.set(p.input2, true);
+			}
+			if(p.output > 0){//ignore outputs for zero reg
+				outputs_.set(p.output, true);
+			}
+			dependencies_anti_ |= p.anti_dependencies;
+    		dependencies_output_ |= p.output_dependencies;
 		}
 
-		//called recursively for children
-		virtual Path extend_path(uint32_t length, float score_bonus, float score_multiplier, uint32_t tree_id){
+		//called recursively for children and extends path if new score > old score
+		//force_extension always extends the path with child at 
+		//depth == force_extension_depth and child_instruction == instruction
+		//if force extension == -1 -> don't force any extension
+		//non R Nodes ignore force_extension as they don't have any children
+		virtual Path extend_path(const PathExtensionParams& p){
 			Path max_path;
-			max_path.length = length;
+			max_path.length = p.length;
 			max_path.minimum_weight = weight;
 
 			//score multiplier for this singular node
@@ -291,16 +492,54 @@ class InstructionNode{
 			//including branches etc. should reduce the score of the whole path, so its not chosen
 			float score_multiplier_of_this_node = get_score_multiplier();
 
-			max_path.score_bonus = score_bonus + score_bonus_of_this_node;
+			max_path.score_bonus = p.score_bonus + score_bonus_of_this_node;
 			max_path.score_multiplier = 
-			score_multiplier * score_multiplier_of_this_node; 
+			p.score_multiplier * score_multiplier_of_this_node; 
 			max_path.inverse_dependency_score = get_inv_dep_score();
 
 			max_path.opcodes.push_back(instruction);
 			max_path.path_hashes.push_back(subtree_hash);
 
+			max_path.end_of_sequence = this;
+
 			return max_path;
 
+		}
+
+		virtual std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function){
+			printf("Warning: Forcing path extension of non R Node\n");
+			return {};
+		}
+
+		virtual std::vector<PathNode> path_to_path_nodes(Path path, uint depth){
+			std::vector<PathNode> nodes; 
+
+			std::set<int8_t> indices_anti;
+			std::set<int8_t> indices_out;
+			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
+				if (dependencies_anti_[i]) {
+					indices_anti.insert(i);
+				}
+				if (dependencies_output_[i]) {
+					indices_out.insert(i);
+				}
+			}
+			//PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, std::map<uint64_t, int> pcs, std::array<bool, INSTRUCTION_TREE_DEPTH> deps) {
+			PathNode n = PathNode(instruction, weight, get_score_bonus(), get_score_multiplier(), get_inv_dep_score(), 
+									get_pc(), 
+									dependencies_true_, indices_out, indices_anti);
+			nodes.push_back(n);
+			return nodes;
+		} 
+
+		//find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
+		// and another possible branch not taken, which would lead to a different sequence 
+		virtual std::vector<BranchingPoint> find_variant_branch(Path path, uint depth){
+			return {}; //no possible branching points for leaf nodes
+		}
+
+		virtual int prune_tree(uint64_t weight_threshold, uint8_t depth){
+			return 0;
 		}
 
 };
@@ -314,17 +553,27 @@ class InstructionNodeR : virtual public InstructionNode{
 		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
 						uint8_t next_rb_index);
 
-		InstructionNode* insert(Opcode::Mapping op, uint64_t pc, 
-								int8_t dependency1, int8_t dependency2, int8_t relative_overwrite, 
-								uint8_t depth);
-		void _print(uint8_t level);
+		InstructionNode* insert(const StepInsertInfo& p) override;
+
+		void _print(uint8_t level) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
 									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold);
-		Path extend_path(uint32_t length, float score_bonus, float score_multiplier, uint32_t tree_id);
+									bool reduce_graph_output, float branch_omission_threshold) override;
+		
+		//finds the most promising optimization sequence for this tree by evaluating every possible sequence
+		Path extend_path(const PathExtensionParams& p) override;
+		//extend existing path beyond its original endpoint
+		//expects an existing path + first Node new path that should be extended
+		//handles possible branch instructions and the calls extend_path() 
+		std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function) override;
+		std::map<uint64_t, int> get_pc() override;
+
+		std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override; 
+		std::vector<BranchingPoint> find_variant_branch(Path path, uint depth) override;
+		int prune_tree(uint64_t weight_threshold, uint8_t depth) override;
 };
 
 class InstructionNodeLeaf : virtual public InstructionNode{
@@ -333,17 +582,18 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 
 	std::map<uint64_t, int> pc_map;
 
-	InstructionNode* insert(Opcode::Mapping op, uint64_t pc, 
-								int8_t dependency1, int8_t dependency2, int8_t relative_overwrite, 
-								uint8_t depth);
+	InstructionNode* insert(const StepInsertInfo& p) override;
 
-	void _print(uint8_t level);
+	void _print(uint8_t level) override;
 
 	std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
 									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold);
+									bool reduce_graph_output, float branch_omission_threshold) override;
+
+	virtual void update_weight(const StepUpdateInfo& p);
+	std::map<uint64_t, int> get_pc() override;
 };
 
 class MemoryNode{
@@ -381,13 +631,13 @@ class InstructionNodeMemory : public InstructionNodeR, virtual public MemoryNode
 		InstructionNodeMemory(Opcode::Mapping instruction, uint64_t parent_hash, 
 								uint64_t memory_access, bool is_store_instruction);
 
-		void _print(uint8_t level);
+		void _print(uint8_t level) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
 									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold);
+									bool reduce_graph_output, float branch_omission_threshold) override;
 
 };
 
@@ -397,13 +647,13 @@ class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public Mem
 									uint64_t memory_access, bool is_store_instruction);
 
 
-		void _print(uint8_t level);
+		void _print(uint8_t level) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
 									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold);
+									bool reduce_graph_output, float branch_omission_threshold) override;
 
 };
 
@@ -463,5 +713,3 @@ class InstructionNodeBranchLeaf : public InstructionNodeLeaf, virtual public Bra
 			return 1.0;
 		}
 };
-
-#endif  // RISCV_ISA_TRACE_H

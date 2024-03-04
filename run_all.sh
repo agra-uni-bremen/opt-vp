@@ -16,7 +16,7 @@ default_app="main"
 
 run_application() {
   local input_file="$1"
-  local command="./vp/build/bin/tiny32-vp --intercept-syscalls '$input_file' --output-file './out/' --seq --csv"
+  local command="./vp/build/bin/tiny32-vp --intercept-syscalls '$input_file' --output-file './out/' --seq"
   echo "Executing: $command"
   eval "$command"
 }

@@ -96,7 +96,7 @@ int sc_main(int argc, char **argv) {
 	}
 	core0.error_on_zero_traphandler = opt.error_on_zero_traphandler;
 	core1.error_on_zero_traphandler = opt.error_on_zero_traphandler;
-
+	
 	// connect TLM sockets
 	core0_mem_if.isock.bind(bus.tsocks[0]);
 	core1_mem_if.isock.bind(bus.tsocks[1]);

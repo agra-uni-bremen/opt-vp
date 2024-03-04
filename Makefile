@@ -26,6 +26,12 @@ env/basic/vp-display/build/Makefile:
 vp-display: env/basic/vp-display/build/Makefile
 	$(MAKE) -C env/basic/vp-display/build
 
+scoring-functions:
+	mkdir -p vp/build
+	cd vp/build && cmake -DUSE_SYSTEM_SYSTEMC=$(USE_SYSTEM_SYSTEMC) ..
+	cd vp/src/scoring_functions && cmake .
+	$(MAKE) -C vp/src/scoring_functions
+
 vp-clean:
 	rm -rf vp/build
 

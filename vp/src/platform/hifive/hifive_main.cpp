@@ -119,7 +119,8 @@ int sc_main(int argc, char **argv) {
 
 	tlm::tlm_global_quantum::instance().set(sc_core::sc_time(opt.tlm_global_quantum, sc_core::SC_NS));
 
-	ISS core(0, opt.output_file.c_str(), opt.input_hash_list);
+	ISS core(0, opt.output_file.c_str(), opt.input_program.c_str(), 
+							opt.input_hash_list);
 	SimpleMemory dram("DRAM", opt.dram_size);
 	SimpleMemory flash("Flash", opt.flash_size);
 	ELFLoader loader(opt.input_program.c_str());
@@ -217,6 +218,11 @@ int sc_main(int argc, char **argv) {
 
 	if (opt.intercept_syscalls)
 		core.sys = &sys;
+
+	core.output_as_dot = opt.output_as_dot;
+	core.output_as_csv = opt.output_as_csv;
+	core.output_as_json = opt.output_as_json;
+	core.interactive_mode = opt.interactive_mode;
 
 	// connect TLM sockets
 	iss_mem_if.isock.bind(bus.tsocks[0]);
