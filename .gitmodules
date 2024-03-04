@@ -13,3 +13,6 @@
 [submodule "vp/src/vendor/systemc"]
 	path = vp/src/vendor/systemc
 	url = https://github.com/accellera-official/systemc.git
+[submodule "vp/src/lib/json"]
+	path = vp/src/lib/json
+	url = https://github.com/nlohmann/json.git
