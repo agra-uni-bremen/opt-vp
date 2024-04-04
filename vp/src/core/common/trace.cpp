@@ -66,13 +66,13 @@ void InstructionNodeR::insert_rb(
 		register_dependencies_anti[i].reset();
 	}
 
-	if(load_store_dirty)
-	for(size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
-        memory_load[i] = 0;
-		memory_store[i] = 0;
-		load_store_dirty = false;
-    }
-
+	if(load_store_dirty){
+		for(size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
+			memory_load[i] = 0;
+			memory_store[i] = 0;
+			load_store_dirty = false;
+		}
+	}
 	
 
 	std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
@@ -128,6 +128,8 @@ void InstructionNodeR::insert_rb(
 		//int8_t true_dependency3 = -1; //TODO support R4 Fused Multiply Instructions
 
 
+		Type type = getType(current_step->last_executed_instruction);
+		if(type != Type::S) //Store instructions don't use rd
 		for (size_t offset_idx = 0; offset_idx < i; offset_idx++)
 		{
 			// calculate anti dependencies 
@@ -143,7 +145,7 @@ void InstructionNodeR::insert_rb(
 
 		//update access arrays after checking for dependencies
 		//Load Store are an exception as dependencies are checked here to avid an extra type check
-		Type type = getType(current_step->last_executed_instruction);
+
 
 		switch (type)
 		{
@@ -159,29 +161,25 @@ void InstructionNodeR::insert_rb(
 
 		case Type::I :
 			/* rs1, rd */
-			tmp_true_dependency2 = -1;
+			tmp_true_dependency2 = -1; //reset as rs2 is not used (unknown value in variable)
 			register_dependencies_true[rd] = i;
 			register_dependencies_output[rd].set(i, true);
 			tmp_output = rd;
 
 			register_dependencies_anti[rs1].set(i, true);
-			break;
-
-		case Type::S :
-			/* rs1, rs2, memory TODO*/
 
 			l_read = current_step->last_memory_read; 
-			l_store = current_step->last_memory_written;
-			//first check for dependencies
-			//if address !=0 (either store or load is always 0 as this identifies the access type)
-			//start at index-1 and traverse backwards until identical address is found or end is reached
-			if(l_read>0){
+			if(l_read){
+				load_store_dirty = true;
+				// printf("read %s\n", Opcode::mappingStr[current_step->last_executed_instruction]);
 				memory_load[i] = l_read;
 				for (int j = i-1; j >= 0; j--)
 				{
 					if(memory_store[j] == l_read){
 						//found Store instruction that accesses the same address
 						memory_true_dependency = i-j; //TODO check again if this results in the correct index
+						tmp_true_dependency2 = i-j; //just use default true_dependency for now
+						printf("found memory true dependency with idx %d\n", i-j);
 						break;
 					}
 				}
@@ -191,28 +189,62 @@ void InstructionNodeR::insert_rb(
 					// 	//found Load instruction that accesses the same address
 					// 	break;
 					// }
-			}else{
+			}
+			break;
+
+		case Type::S :
+			/* rs1, rs2, memory TODO*/
+			// Store Instructions
+			// printf(Opcode::mappingStr[current_step->last_executed_instruction]);
+
+			l_read = current_step->last_memory_read; 
+			l_store = current_step->last_memory_written;
+			// printf("READ:  %x\nWRITE: %x\n----\n", l_read, l_store);
+			//first check for dependencies
+			//if address !=0 (either store or load is always 0 as this identifies the access type)
+			//start at index-1 and traverse backwards until identical address is found or end is reached
+			// if(l_read>0){
+			// 	memory_load[i] = l_read;
+			// 	for (int j = i-1; j >= 0; j--)
+			// 	{
+			// 		if(memory_store[j] == l_read){
+			// 			//found Store instruction that accesses the same address
+			// 			memory_true_dependency = i-j; //TODO check again if this results in the correct index
+			// 			printf("found memory true dependency with idx %d\n", i-j);
+			// 			break;
+			// 		}
+			// 	}
+			// }else{
 				//if l_store>0
 				//check stores
-				memory_store[i] = l_store;
-				for (int j = i-1; j >= 0; j--)
-				{
-					if(memory_store[j] == l_store){
-						//found Store instruction that accesses the same address
-						memory_output_dependency = i-j;
-						break;
+				if(l_store==0){
+					//TODO should never be 0
+					// printf("[ERROR] memory operation without access\n");
+				}else{
+					memory_store[i] = l_store;
+					for (int j = i-1; j >= 0; j--)
+					{
+						if(memory_store[j] == l_store){
+							//found Store instruction that accesses the same address
+							memory_output_dependency = i-j;
+							output_dependencies.set(i - j,true);
+							printf("found memory output dependency with idx %d\n", i-j);
+							break;
+						}
+					}
+					//check loads
+					for (int j = i-1; j >= 0; j--)
+					{
+						if(memory_load[j] == l_store){
+							//found Load instruction that accesses the same address
+							memory_anti_dependency = i-j;
+							anti_dependencies.set(i - j,true);
+							printf("found memory anti dependency with idx %d\n", i-j);
+							break;
+						}
 					}
 				}
-				//check loads
-				for (int j = i-1; j >= 0; j--)
-				{
-					if(memory_load[j] == l_store){
-						//found Load instruction that accesses the same address
-						memory_anti_dependency = i-j;
-						break;
-					}
-				}
-			}
+			// }
 			
 			
 
@@ -293,7 +325,7 @@ void InstructionNodeR::insert_rb(
 			std::cout << '\r' << std::flush;
 		// }
 		#endif
-
+	
 		if(i>0){//the root node already exists and is current_node
 			current_node = current_node->insert({				
 									current_step->last_executed_instruction, 
@@ -571,6 +603,94 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 	return name;
 }
 
+void InstructionNodeR::to_csv(const CsvParams& p) {
+	std::stringstream csv_stream; 
+	std::map<InstructionType, uint32_t> _instruction_types = 
+												p.instruction_types;
+
+	double current_dep_score = get_inv_dep_score();
+    double current_total_dep_score = p.last_dep_score + current_dep_score;
+
+    uint32_t current_true_dep = count_true_dependencies();
+    uint32_t current_anti_dep = dependencies_anti_.count();
+    uint32_t current_out_dep = dependencies_output_.count();
+
+    uint32_t total_true_dep = p.true_dep +  current_true_dep;
+    uint32_t total_anti_dep = p.anti_dep + current_anti_dep;
+    uint32_t total_out_dep = p.out_dep + current_out_dep;
+
+    std::bitset<32> current_total_inputs = p.total_inputs | inputs_;
+    std::bitset<32> current_total_outputs = p.total_outputs | outputs_;
+
+	uint64_t number_of_pcs = get_pc().size();
+	_instruction_types[getInstructionType(instruction)]++;
+
+	const char* instruction_string = "UNKWN ";
+	if(instruction < Opcode::mappingStr.size()){
+		instruction_string = Opcode::mappingStr[instruction];
+	}
+
+	// uint64_t cycles = 0;
+	// switch (instruction)
+	// {
+	// case Opcode::LB:
+	// case Opcode::LBU:
+	// case Opcode::LH:
+	// case Opcode::LHU:
+	// case Opcode::LW:
+	// case Opcode::SB:
+	// case Opcode::SH:
+	// case Opcode::SW:
+	// 	cycles +=4;
+	// 	break;
+	// case Opcode::MUL:
+	// case Opcode::MULH:
+	// case Opcode::MULHU:
+	// case Opcode::MULHSU:
+	// case Opcode::DIV:
+	// case Opcode::DIVU:
+	// case Opcode::REM:
+	// case Opcode::REMU:
+	// 	cycles +=8;
+	// 	break;
+	// default:
+	// 	cycles +=1;
+	// 	break;
+	// }
+
+	csv_stream = csv_format(p.parent_hash, p.tree, instruction_string, p.last_weight, p.max_weight, p.total_max_weight, 
+								p.depth, current_dep_score, current_total_dep_score, 
+								current_true_dep, current_anti_dep, current_out_dep, 
+								total_true_dep, total_anti_dep,total_out_dep, 
+								children.size(), current_total_inputs.count(), 
+								current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
+								number_of_pcs, p.max_pcs);
+	std::cout << csv_stream.str() <<std::endl;
+
+	for (auto &&child : children)
+	{
+		// csv_stream << std::endl;
+		child->to_csv({
+            p.total_instructions,
+            p.tree,
+            p.depth + 1,
+            current_dep_score,
+            total_true_dep,
+            total_anti_dep,
+            total_out_dep,
+            current_total_inputs,
+			current_total_outputs,
+            _instruction_types,
+            subtree_hash,
+            p.max_weight,
+			weight,//last weight
+            p.total_max_weight,
+            p.max_pcs
+        });
+	}
+
+}
+
 //called recursively for children
 Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 	
@@ -712,11 +832,15 @@ std::vector<Path> InstructionNodeR::force_path_extension(const Path p, std::func
 
 int InstructionNodeR::prune_tree(uint64_t weight_threshold, uint8_t depth){
 	uint8_t child_idx = 0;
-	printf("\t\tpruned branch at depth:\n\t\t");
+	bool pruned = false;
 	for (InstructionNode*& child : children) {//iterate over the actual pointers
 		if (child->weight < weight_threshold)
 		{
-			printf("%d, ", depth);
+			if(!pruned){
+				printf("\t\tpruned branch at depth: %d\n", depth);
+				pruned = true;
+
+			}
 			if(dynamic_cast<InstructionNodeLeaf*>(child)){
 				return 1; //branch should be pruned, but child is leaf/end of branch anyway
 			}

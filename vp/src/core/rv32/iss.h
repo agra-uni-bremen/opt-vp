@@ -170,9 +170,9 @@ struct PendingInterrupts {
 };
 
 enum class AccessType {
-	NONE=-1,
-	LOAD=0,
-	STORE=1
+	NONE=0,
+	LOAD=1,
+	STORE=2
 };
 
 struct ISS : public external_interrupt_target, public clint_interrupt_target, public iss_syscall_if, public debug_target_if {
@@ -222,7 +222,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	uint64_t prev_cycles = 0;
 
 	std::map<uint64_t, std::tuple<uint64_t,uint64_t>> memory_access_map; //map mem -> write_access | load_access
-	std::tuple<uint64_t, AccessType> last_memory_access = {-1, AccessType::NONE}; //address, is_store = 1 is_load = 0 no_memory_access=-1
+	std::tuple<uint64_t, AccessType> last_memory_access = {0, AccessType::NONE}; //address, is_store = 2 is_load = 1 no_memory_access=0
 
 	uint8_t ring_buffer_index =  0;
 	CoreExecStatus status = CoreExecStatus::Runnable;
@@ -389,7 +389,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	void run() override;
 
 	void output_dot(std::streambuf *cout_save);
-	//void output_csv(std::streambuf *cout_save);
+	void output_csv(std::streambuf *cout_save);
 	void output_json(std::streambuf *cout_save, 
 		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
 		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 

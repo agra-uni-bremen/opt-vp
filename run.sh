@@ -6,5 +6,5 @@ then
 input_file=sw/basic-c/main
 fi
 
-time ./vp/build/bin/tiny32-vp --intercept-syscalls $input_file --output-file ./out/ --seq $margs
+time ./vp/build/bin/tiny32-vp --intercept-syscalls $input_file --output-file ./out/ --csv --seq $margs
 

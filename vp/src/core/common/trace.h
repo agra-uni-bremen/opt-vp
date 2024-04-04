@@ -7,8 +7,6 @@
 #include "lib/json/single_include/nlohmann/json.hpp"
 
 #define INSTRUCTION_TREE_DEPTH 50
-
-//TODO use options instead of defines
 #define MAX_VARIANTS 3
 #define SF_BATCH_SIZE 3
 #define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
@@ -18,11 +16,11 @@
 
 #define O_STARTUP 1000
 #define O_BEGINNING 10000
-#define O_MID 3000000
+#define O_MID 3000000 //TODO use input instead
 //#define O_END
 
-#define trace_pcs  
-#define log_pcs
+#define trace_pcs
+//#define log_pcs
 //#define debug_register_dependencies
 
 // extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
@@ -203,6 +201,24 @@ struct PathNode {
 				INSTRUCTION_TREE_DEPTH> dep_true, std::set<int8_t> dep_out, std::set<int8_t> dep_anti);
 
 	nlohmann::json to_json();
+};
+
+struct CsvParams {
+    uint64_t total_instructions;
+    const char* tree;
+    uint32_t depth;
+    double last_dep_score;
+    uint32_t true_dep;
+    uint32_t anti_dep;
+    uint32_t out_dep;
+    std::bitset<32> total_inputs;
+	std::bitset<32> total_outputs;
+    std::map<InstructionType, uint32_t> instruction_types;
+    uint64_t parent_hash;
+    uint64_t max_weight;
+	uint64_t last_weight;
+    uint64_t total_max_weight;
+    uint64_t max_pcs;
 };
 
 struct PathExtensionParams {
@@ -424,6 +440,89 @@ class InstructionNode{
 			std::cout << dot_stream.str() << std::endl;
 		}
 
+		//might be easier to use a struct but this way its harder to miss a parameter
+		virtual std::stringstream csv_format(uint64_t parent_hash, const char* tree, const char* instruction_string,
+										uint64_t last_weight, uint64_t max_weight, uint64_t total_max_weight, uint32_t depth, 
+										double current_dep_score, double current_total_dep_score, 
+										uint32_t current_true_dep, uint32_t current_anti_dep, uint32_t current_out_dep, 
+										uint32_t total_true_dep, uint32_t total_anti_dep, uint32_t total_out_dep, 
+										uint32_t num_children, uint32_t num_current_total_inputs, uint32_t num_current_total_outputs, 
+										uint32_t num_branches, uint64_t number_of_pcs, uint64_t max_pcs){
+			std::stringstream csv_stream; 
+			csv_stream << subtree_hash << ";" //ID
+					<< parent_hash << ";" //parent subtree hash
+					<< tree << ";" //Tree
+					<< instruction_string << ";" //This instruction 
+					<< weight << ";"
+					<< last_weight - weight << ";"
+					<< max_weight - weight << ";"
+					<< total_max_weight - weight << ";"
+					<< depth << ";" //Length
+					<< INSTRUCTION_TREE_DEPTH - depth << ";" //Length
+					<< -1 << ";" //cycles used by sequence for one iteration
+					<< current_dep_score << ";"
+					<< current_total_dep_score << ";"
+					<< current_true_dep << ";" //dependencies_true_ TODO convert to bitset
+					<< current_anti_dep << ";"
+					<< current_out_dep << ";"
+					<< total_true_dep << ";" 
+					<< total_anti_dep << ";" 
+					<< total_out_dep << ";" 
+					<< num_children << ";" //children
+					<< Opcode::NUMBER_OF_INSTRUCTIONS - num_children << ";"
+					<< inputs_.count() << ";"
+					<< num_current_total_inputs << ";"
+					<< outputs_.count() << ";"
+					<< num_current_total_outputs << ";"
+					<< -1 << ";" //TODO Instruction Types
+					<< num_branches << ";" //Number of Branches
+					<< occurrence[0] << ";"
+					<< occurrence[1] << ";"
+					<< occurrence[2] << ";"
+					<< occurrence[3] << ";"
+					<< number_of_pcs << ";"
+					<< max_pcs - number_of_pcs << ";";
+
+			return csv_stream;
+		}
+
+		virtual void to_csv(const CsvParams& p){
+			std::stringstream csv_stream; 
+			std::map<InstructionType, uint32_t> _instruction_types = 
+											p.instruction_types;
+
+			double current_dep_score = get_inv_dep_score();
+			double current_total_dep_score = p.last_dep_score + current_dep_score;
+
+			uint32_t current_true_dep = count_true_dependencies();
+			uint32_t current_anti_dep = dependencies_anti_.count();
+			uint32_t current_out_dep = dependencies_output_.count();
+
+			uint32_t total_true_dep = p.true_dep +  current_true_dep;
+			uint32_t total_anti_dep = p.anti_dep + current_anti_dep;
+			uint32_t total_out_dep = p.out_dep + current_out_dep;
+
+			std::bitset<32> current_total_inputs = p.total_inputs | inputs_;
+			std::bitset<32> current_total_outputs = p.total_outputs | outputs_;
+
+			uint64_t number_of_pcs = get_pc().size();
+			_instruction_types[getInstructionType(instruction)]++;
+
+			const char* instruction_string = "UNKWN ";
+			if(instruction < Opcode::mappingStr.size()){
+				instruction_string = Opcode::mappingStr[instruction];
+			}
+				csv_stream = csv_format(p.parent_hash, p.tree, instruction_string, p.last_weight ,p.max_weight, p.total_max_weight, 
+								p.depth, current_dep_score, current_total_dep_score, 
+								current_true_dep, current_anti_dep, current_out_dep, 
+								total_true_dep, total_anti_dep,total_out_dep, 
+								0, current_total_inputs.count(), 
+								current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
+								number_of_pcs, p.max_pcs);
+
+			std::cout << csv_stream.str() << std::endl;
+		}
+
 		virtual std::map<uint64_t, int> get_pc() = 0;
 
 		virtual std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
@@ -562,6 +661,7 @@ class InstructionNodeR : virtual public InstructionNode{
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
 									uint64_t tree_weight, uint64_t total_instructions, 
 									bool reduce_graph_output, float branch_omission_threshold) override;
+		void to_csv(const CsvParams& p) override;
 		
 		//finds the most promising optimization sequence for this tree by evaluating every possible sequence
 		Path extend_path(const PathExtensionParams& p) override;
