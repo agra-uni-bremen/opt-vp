@@ -30,13 +30,17 @@ using namespace Opcode;
 	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> memory_store;
 	bool load_store_dirty = true; //fill with default during first iteration
 
+inline uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash){
+	return ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
+}
+
 //InstructionNodeR
 InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash)
 			: InstructionNode(instruction, parent_hash){
-				for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
-					{
-						dependencies_true_[i] = false;
-					}
+				// for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
+				// 	{
+				// 		dependencies_true_[i] = false;
+				// 	}
 }
 
 void InstructionNodeR::insert_rb(
@@ -568,7 +572,7 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 
 		if(reduce_graph_output && per_weight<branch_omission_threshold){
 			int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-			printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
+			//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
 			connections_stream << " style=\"dashed\" color=\"gray" << shade
 			<<  "\" fontcolor=\"gray" << shade 
 			<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
@@ -966,7 +970,7 @@ std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const ch
 
 			if(reduce_graph_output && per_weight<branch_omission_threshold){
 				int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-				printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
+				//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
 				connections_stream << " style=\"dashed\" color=\"gray" << shade
 				<<  "\" fontcolor=\"gray" << shade 
 				<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
@@ -1117,7 +1121,7 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 
 		if(reduce_graph_output && per_weight<branch_omission_threshold){
 			int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-			printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
+			//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
 			connections_stream << " style=\"dashed\" color=\"gray" << shade
 			<<  "\" fontcolor=\"gray" << shade 
 			<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
@@ -1138,7 +1142,6 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 		dot_stream << "[label=\"" << top_label.str() << "\", shape = record, color=" << color_index << ", colorscheme=spectral11" << "]" << std::endl;
 	}
 
-	//parent_hash = (parent_hash << 6) + instruction; //shifting by 6 should shift value outside opcode range 
 	int child_index = 0;
 	for (auto child : children) {
 		child->to_dot(tree_op_name, name.str().c_str(), 
@@ -1175,7 +1178,7 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 		const char* label = instruction_string;
 		std::stringstream name;
 		//HTML type
-		if(depth>=INSTRUCTION_TREE_DEPTH-1){
+		if(depth>=INSTRUCTION_TREE_DEPTH-1){//standard leaf node
 			name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
 			
 			dot_stream << name.str(); 
@@ -1210,7 +1213,7 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 
 			if(reduce_graph_output && per_weight<branch_omission_threshold){
 				int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-				printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
+				//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
 				connections_stream << " style=\"dashed\" color=\"gray" << shade
 				<<  "\" fontcolor=\"gray" << shade 
 				<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
@@ -1220,19 +1223,15 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 				connections_stream << "]" << std::endl;
 			}
 
-		}else{
+		}else{//leaf node inside tree (only created by pruning the tree)
 			name << "pruned_" << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
 			
 			dot_stream << name.str(); 
 			float per_weight = (float)weight/(float)tree_weight;
 			uint16_t color_index = 1; //9 colors (1-9) TODO configure rounding
 			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-			<< "<TR><TD>" 
-			<< label 
-			<< "</TD></TR>" 
-			<< "<TR><TD><FONT COLOR=\"0.8 0.0 0.1\" POINT-SIZE=\"14\">" 
-			<< std::hex << "pruned" << std::dec 
-			<< "</FONT></TD></TR>" 
+			<< "<TR><TD>" << label << "</TD></TR>" 
+			<< "<TR><TD><FONT COLOR=\"0.8 0.0 0.1\" POINT-SIZE=\"14\"> pruned </FONT></TD></TR>"
 
 			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
 			for (auto const& x : pc_map)
@@ -1252,12 +1251,10 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 			connections_stream << "]" << std::endl;
 
 			dot_stream << std::dec << std::endl;
-			//<< "Error: using leaf node inside tree" << std::endl;
 			printf("[Warning]: using leaf node inside tree for dot (pruned?)\n");
 			return name;
 		}
 
-		
 		//dont process children as this is a leaf node
 
 		return name;

@@ -20,7 +20,7 @@
 //#define O_END
 
 #define trace_pcs
-//#define log_pcs
+#define log_pcs
 //#define debug_register_dependencies
 
 // extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
@@ -240,6 +240,8 @@ struct BranchingPoint
 	InstructionNode* starting_point;
 };
 
+uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash);
+
 class InstructionNode{
 	public:
 		InstructionNode(){
@@ -249,10 +251,10 @@ class InstructionNode{
 		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash)
 				: instruction(instruction), weight(0){
 					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
-					for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
-					{
-						dependencies_true_[i] = false;
-					}
+					// for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
+					// {
+					// 	dependencies_true_[i] = false;
+					// }
 					
 		}
 
@@ -605,8 +607,9 @@ class InstructionNode{
 
 		}
 
+		//might happen if best sequence length == Max Tree Depth
 		virtual std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function){
-			printf("Warning: Forcing path extension of non R Node\n");
+			printf("Warning: Forcing path extension of non R Node\nConsider increasing the maximum tree depth\n");
 			return {};
 		}
 

@@ -2087,7 +2087,7 @@ void ISS::output_dot(std::streambuf *cout_save){
 
 		}else{//one dot file for each opcode output in directory
 			std::string single_output_filename = "";
-			std::cout << "writing to directory " << output_filename << std::endl;
+			std::cout << "writing dot files to directory " << output_filename << std::endl;
 			//output = std::ofstream(output_filename);
 			//output << "//" << std::time(0) << std::endl;
 			//std::cout.rdbuf(output.rdbuf());
@@ -2143,7 +2143,7 @@ void ISS::output_csv(std::streambuf *cout_save){
 			std::string file_path = std::string(input_filename);
 			std::string application_name = file_path.substr(file_path.find_last_of("\//")+1);
 			
-			std::cout << "writing csv to directory " << output_filename << std::endl;
+			std::cout << "writing csv files to directory " << output_filename << std::endl;
 			single_output_filename = output_filename + 
 										std::string("Execution_Trees_") + 
 										application_name + 
@@ -2229,10 +2229,11 @@ void ISS::output_json(std::streambuf *cout_save,
 	std::ofstream output;
 	nlohmann::json top_level_json;
 		int idx = 0;
+		printf("Converting Full Paths to JSON\n");
 		for (auto &&seq : discovered_sequences_node_list)
 		{
+			printf(".");
 			nlohmann::json path_node_json_array = nlohmann::json::array();
-			printf("Converting Full Path [%d] to JSON\n", idx);
 			for (auto &&node : seq)
 			{
 				nlohmann::json path_node_json = node.to_json();	
@@ -2273,6 +2274,7 @@ void ISS::output_json(std::streambuf *cout_save,
 			}
 			idx++;
 		}
+		printf("\n");
 
 
 		//save or print json
@@ -2341,8 +2343,9 @@ void ISS::show() {
 		Path p = tree.extend_path({1, 0, 1.0, i, -1, Opcode::Mapping::UNDEF, sf});
 		discovered_sequences.push_back(p);
 		i++;
+		printf(".");
 	}
-	printf("analyzed all trees\n");
+	printf("-> analyzed all trees\n");
 
 	//sort discovered paths to print most relevant ones last
 	// std::function<float(ScoreParams)> score_func = sf;
@@ -2356,6 +2359,7 @@ void ISS::show() {
 	std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists;
 	std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists;
 
+	printf("\n -----------------\n| Best Sequences |\n -----------------\n");
 	for (auto &&p : discovered_sequences)
 	{
 
