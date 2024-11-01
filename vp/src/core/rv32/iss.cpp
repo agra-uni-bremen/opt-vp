@@ -1996,9 +1996,12 @@ struct LoadedLibrary {
 LoadedLibrary load_scoring_functions(const std::string& libraryPath){
 	void* library = dlmopen(-1, libraryPath.c_str(), RTLD_NOW); // | RTLD_GLOBAL
 	std::cout << "Loading library from: " << libraryPath << std::endl;
+
+	std::array<ScoreFunction, SF_BATCH_SIZE>* score_functions_ptr; 
 	if (!library) {
 		std::cerr << "Error loading the library: " << dlerror() << std::endl;
-		exit(EXIT_FAILURE);
+		//exit(EXIT_FAILURE);
+		return {NULL, nullptr};
 	}
 
 	// std::array<ScoreFunction, SF_BATCH_SIZE>* (*getScoreFunctions)() = 
@@ -2009,13 +2012,14 @@ LoadedLibrary load_scoring_functions(const std::string& libraryPath){
 	// 	exit(EXIT_FAILURE);
 	// }
 
-	std::array<ScoreFunction, SF_BATCH_SIZE>* score_functions_ptr = 
+	score_functions_ptr = 
 		(std::array<ScoreFunction, SF_BATCH_SIZE>*)dlsym(library, "score_functions");
 
 	if (!score_functions_ptr) {
 		std::cerr << "Error getting score_functions pointer: " << dlerror() << std::endl;
 		dlclose(library);
-		exit(EXIT_FAILURE);
+		//exit(EXIT_FAILURE);
+		return {library, nullptr};
 	}
 	return {library, *score_functions_ptr};
 }
@@ -2490,32 +2494,43 @@ void ISS::show() {
 
 	//evaluate additional score functions
 	LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
-	std::array<ScoreFunction, SF_BATCH_SIZE> score_functions = sf_lib.functions;
+	std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
+	if(sf_lib.handle){
+		if(sf_lib.functions.size() > 0){//TODO 
+			score_functions = sf_lib.functions;
+
+			 // Access the score_functions array and call the functions
+			std::cout << "Testing loaded score functions: " << std::endl;
+			for (const auto& func : score_functions) {
+				std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
+			}
+
+			// {
+			//     [](ScoreParams p) -> float {
+			// 		float score = ((p.length * p.weight) * p.score_multiplier 
+			// 			+ p.weight * p.score_bonus); //length * minimum_weight;
+			// 		return score;
+			// 	},
+			//     [](ScoreParams p) -> float {
+			// 		float score = ((p.length * p.weight) * p.score_multiplier 
+			// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
+			// 		return score;
+			// 	},
+			//     [](ScoreParams p) -> float {
+			// 		float score = ((p.length * p.weight) * p.score_multiplier 
+			// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
+			// 		return score;
+			// 	}
+			// };
+		}else{
+			std::cout << "Error loading scoring functions from library\nSkipping additional scoring functions" << std::endl;
+		}
+	}else{
+		std::cout << "Could not find library at default path\nSkipping additional scoring functions" << std::endl;
+	}
 	
 
-    // Access the score_functions array and call the functions
-	std::cout << "Testing loaded score functions: " << std::endl;
-    for (const auto& func : score_functions) {
-        std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
-    }
-
-	// {
-    //     [](ScoreParams p) -> float {
-	// 		float score = ((p.length * p.weight) * p.score_multiplier 
-	// 			+ p.weight * p.score_bonus); //length * minimum_weight;
-	// 		return score;
-	// 	},
-    //     [](ScoreParams p) -> float {
-	// 		float score = ((p.length * p.weight) * p.score_multiplier 
-	// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
-	// 		return score;
-	// 	},
-    //     [](ScoreParams p) -> float {
-	// 		float score = ((p.length * p.weight) * p.score_multiplier 
-	// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
-	// 		return score;
-	// 	}
-    // };
+   
 
 
 	if(interactive_mode){
@@ -2541,6 +2556,7 @@ void ISS::show() {
 						"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
 				sf_lib = load_scoring_functions(library_path);
 				score_functions = sf_lib.functions;
+				//TODO add checks for library and allow to specify custom path
 				run_id++;
 			} 
 			else if(mode == 'a'){ //run analysis
@@ -2591,7 +2607,9 @@ void ISS::show() {
 	}
 	
 	//close library
-	dlclose(sf_lib.handle);
+	if(sf_lib.handle){
+		dlclose(sf_lib.handle);
+	}
 
 	std::cout << "total instructions: " << csrs.instret.reg << "(" << total_num_instr << ")" << " [" << total_percent*100 << "]" << std::endl;
 	std::cout << "total cycles: " << _compute_and_get_current_cycles() << std::endl;
