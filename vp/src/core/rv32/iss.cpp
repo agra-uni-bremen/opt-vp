@@ -2312,6 +2312,41 @@ void ISS::output_json(std::streambuf *cout_save,
 		}
 }
 
+void ISS::output_full(std::streambuf *cout_save){
+	std::ofstream output;
+	nlohmann::ordered_json top_level_json;
+	std::cout << "writing json to directory " << output_filename << std::endl;
+
+	std::string single_output_filename = "";
+	uint64_t index = 0;
+	for (InstructionNodeR& tree : instruction_trees){
+		nlohmann::ordered_json tree_json_array = nlohmann::ordered_json::array();
+		std::string file_path = std::string(input_filename);
+		std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
+		single_output_filename = output_filename + application_name +
+								std::string(Opcode::mappingStr[tree.instruction]) + 
+								std::string(".json");
+
+		output = std::ofstream(single_output_filename);
+		std::cout.rdbuf(output.rdbuf());
+		tree_json_array = tree.to_json();
+		std::string json_string = tree_json_array.dump(4);
+		std::cout << json_string << std::endl;
+		index++;
+
+		//csrs.instret.reg
+		printf(".");
+
+	}
+	printf("Done\n");
+
+			if(output_filename){ //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		// }
+}
+
 void ISS::show() {
 	boost::io::ios_flags_saver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
@@ -2540,9 +2575,11 @@ void ISS::show() {
 		while (true) {
 			std::cout << "\nEnter \n" 
 						<< "\t'a' to run tree analysis\n"
+						<< "\t'b' to run analysis performance benchmark\n"
 						<< "\t'r' to reload the library\n" 
 						<< "\t'p [% threshold]' to prune trees\n" 
 						<< "\t'd' to export as dot\n" 
+						<< "\t'e' for a full export as json\n" 
 						<< "\t'q' to quit\n" 
 						<< ":"<< std::endl;
 			std::string userInput; 
@@ -2560,6 +2597,9 @@ void ISS::show() {
 				run_id++;
 			} 
 			else if(mode == 'a'){ //run analysis
+				analyze_trees(score_functions, instruction_trees);
+			} 
+			else if(mode == 'b'){ //run analysis benchmark
 				using std::chrono::high_resolution_clock;
 				using std::chrono::duration;
 				using std::chrono::milliseconds;
@@ -2599,6 +2639,11 @@ void ISS::show() {
 				printf("exporting trees to dot\n");
 				std::streambuf *cout_save = std::cout.rdbuf();
 				output_dot(cout_save);
+			}
+			else if (mode == 'e') {
+				printf("exporting trees to json\n");
+				std::streambuf *cout_save = std::cout.rdbuf();
+				output_full(cout_save);
 			} 
 			else {
 				std::cout << "Invalid input." << std::endl;

@@ -394,6 +394,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
 		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
 		std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists);
+	void output_full(std::streambuf *cout_save);
 
 	void show();
 };

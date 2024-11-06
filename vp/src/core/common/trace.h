@@ -39,6 +39,18 @@ enum class InstructionType {
 	Float_R4,
 };
 
+enum class NODE_TYPE {
+	BASE = 0,
+	NODE = 1, 
+	LEAF = 2, 
+	BRANCH = 4, 
+	MEMORY = 8, 
+	BRANCH_R = NODE | BRANCH, 
+	BRANCH_L = LEAF | BRANCH, 
+	MEMORY_R = NODE | MEMORY, 
+	MEMORY_L = LEAF | MEMORY, 
+};
+
 InstructionType getInstructionType(Opcode::Mapping mapping);
 
 struct ExecutionInfo {
@@ -441,6 +453,57 @@ class InstructionNode{
 
 			std::cout << dot_stream.str() << std::endl;
 		}
+		
+		virtual nlohmann::ordered_json to_json(){
+			nlohmann::ordered_json jsonNode;
+			jsonNode["instruction"] = Opcode::mappingStr[instruction];
+			jsonNode["type"] = get_node_type();
+			jsonNode["weight"] = weight;
+			jsonNode["subtree_hash"] = subtree_hash;
+
+			//convert dependencies
+			std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
+			std::set<int8_t> anti_dependencies;
+			std::set<int8_t> output_dependencies;
+
+			for (size_t i = 1; i < INSTRUCTION_TREE_DEPTH; i++){
+					if(dependencies_true_[i]){
+						true_dependencies.push_back(i);
+					}
+					if (dependencies_anti_[i]) {
+						anti_dependencies.insert(i);
+					}
+					if (dependencies_output_[i]) {
+						output_dependencies.insert(i);
+					}
+			}
+
+			std::set<int8_t> inputs;
+			std::set<int8_t> outputs;
+
+			for (size_t i = 0; i < 32; i++){
+					if(inputs_[i]){
+						inputs.insert(i);
+					}
+					if (outputs_[i]) {
+						outputs.insert(i);
+					}
+			}
+
+			nlohmann::json jsonDependencies1 = true_dependencies;
+			jsonNode["dependencies_true"] = jsonDependencies1;
+			nlohmann::json jsonDependencies2 = anti_dependencies;
+			jsonNode["dependencies_anti"] = jsonDependencies2;
+			nlohmann::json jsonDependencies3 = output_dependencies;
+			jsonNode["dependencies_output"] = jsonDependencies3;
+
+			jsonNode["inputs"] = inputs;
+			jsonNode["outputs"] = outputs;
+
+			jsonNode["occurrence"] = occurrence;
+
+			return jsonNode;
+	}
 
 		//might be easier to use a struct but this way its harder to miss a parameter
 		virtual std::stringstream csv_format(uint64_t parent_hash, const char* tree, const char* instruction_string,
@@ -644,10 +707,15 @@ class InstructionNode{
 			return 0;
 		}
 
+		virtual NODE_TYPE get_node_type(){
+			return NODE_TYPE::BASE;
+		}
+
 };
 
 class InstructionNodeR : virtual public InstructionNode{
 	public:
+		//static const NODE_TYPE node_type = NODE_TYPE::NODE;
 		InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash);
 
 		std::list<InstructionNode*> children;
@@ -665,6 +733,8 @@ class InstructionNodeR : virtual public InstructionNode{
 									uint64_t tree_weight, uint64_t total_instructions, 
 									bool reduce_graph_output, float branch_omission_threshold) override;
 		void to_csv(const CsvParams& p) override;
+
+		nlohmann::ordered_json to_json() override;
 		
 		//finds the most promising optimization sequence for this tree by evaluating every possible sequence
 		Path extend_path(const PathExtensionParams& p) override;
@@ -677,6 +747,7 @@ class InstructionNodeR : virtual public InstructionNode{
 		std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override; 
 		std::vector<BranchingPoint> find_variant_branch(Path path, uint depth) override;
 		int prune_tree(uint64_t weight_threshold, uint8_t depth) override;
+		NODE_TYPE get_node_type() override;
 };
 
 class InstructionNodeLeaf : virtual public InstructionNode{
@@ -695,8 +766,11 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 									uint64_t tree_weight, uint64_t total_instructions, 
 									bool reduce_graph_output, float branch_omission_threshold) override;
 
+	nlohmann::ordered_json to_json() override;
+
 	virtual void update_weight(const StepUpdateInfo& p);
 	std::map<uint64_t, int> get_pc() override;
+	NODE_TYPE get_node_type() override;
 };
 
 class MemoryNode{
@@ -709,6 +783,15 @@ class MemoryNode{
 
 		MemoryNode(){};
 		MemoryNode(bool is_store_instruction);
+
+		nlohmann::ordered_json memory_to_json(){
+			nlohmann::ordered_json json; 
+			json["LS"] = is_store;
+			json["MemoryLocation"] = memory_location; //TODO make this a list?
+			json["Accesses"] = memory_accesses;
+			json["OffsetSum"] = access_offset_sum;
+			return json;
+		};
 
 		void register_access(uint64_t address, uint64_t prev_writer, uint64_t prev_reader, 
 								uint64_t stackpointer, uint64_t framepointer);
@@ -723,6 +806,13 @@ class BranchNode{
 
 		BranchNode(){};
 		BranchNode(int64_t offset);
+
+		nlohmann::ordered_json branch_to_json(){
+			nlohmann::ordered_json json; 
+			json["Direction"] = (is_backward_jump * 1) + (is_forward_jump * 2);
+			json["offsets"] = relative_offsets;
+			return json;
+		};
 
 		void register_access(uint64_t address, uint64_t prev_writer, uint64_t prev_reader, 
 								uint64_t stackpointer, uint64_t framepointer);
@@ -742,6 +832,13 @@ class InstructionNodeMemory : public InstructionNodeR, virtual public MemoryNode
 									uint64_t tree_weight, uint64_t total_instructions, 
 									bool reduce_graph_output, float branch_omission_threshold) override;
 
+	nlohmann::ordered_json to_json() override{
+		nlohmann::ordered_json additional_fields = MemoryNode::memory_to_json();
+		nlohmann::ordered_json base_class_json = InstructionNodeR::to_json();
+		base_class_json.update(additional_fields);
+		return base_class_json;
+	}
+	NODE_TYPE get_node_type() override;
 };
 
 class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public MemoryNode{
@@ -758,6 +855,13 @@ class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public Mem
 									uint64_t tree_weight, uint64_t total_instructions, 
 									bool reduce_graph_output, float branch_omission_threshold) override;
 
+	nlohmann::ordered_json to_json() override{
+		nlohmann::ordered_json additional_fields = MemoryNode::memory_to_json();
+		nlohmann::ordered_json base_class_json = InstructionNodeLeaf::to_json();
+		base_class_json.update(additional_fields);
+		return base_class_json;
+	}
+	NODE_TYPE get_node_type() override;
 };
 
 
@@ -786,6 +890,13 @@ class InstructionNodeBranch : public InstructionNodeR, virtual public BranchNode
 			
 			return 1.0;
 		}
+	NODE_TYPE get_node_type() override;
+	nlohmann::ordered_json to_json() override{
+		nlohmann::ordered_json additional_fields = BranchNode::branch_to_json();
+		nlohmann::ordered_json base_class_json = InstructionNodeR::to_json();
+		base_class_json.update(additional_fields);
+		return base_class_json;
+	}
 };
 
 class InstructionNodeBranchLeaf : public InstructionNodeLeaf, virtual public BranchNode{
@@ -815,4 +926,11 @@ class InstructionNodeBranchLeaf : public InstructionNodeLeaf, virtual public Bra
 			
 			return 1.0;
 		}
+	NODE_TYPE get_node_type() override;
+	nlohmann::ordered_json to_json() override{
+		nlohmann::ordered_json additional_fields = BranchNode::branch_to_json();
+		nlohmann::ordered_json base_class_json = InstructionNodeLeaf::to_json();
+		base_class_json.update(additional_fields);
+		return base_class_json;
+	}
 };

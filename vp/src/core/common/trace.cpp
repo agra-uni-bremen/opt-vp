@@ -695,6 +695,21 @@ void InstructionNodeR::to_csv(const CsvParams& p) {
 
 }
 
+nlohmann::ordered_json InstructionNodeR::to_json(){
+	nlohmann::ordered_json additional_fields;
+
+	nlohmann::ordered_json jsonChildren = nlohmann::ordered_json::array(); 
+	for (auto &&child : children)
+	{
+		jsonChildren.push_back(child->to_json());
+	}
+	additional_fields["children"] = jsonChildren;
+
+	nlohmann::ordered_json base_class_json = InstructionNode::to_json();
+	base_class_json.update(additional_fields);
+	return base_class_json;
+}
+
 //called recursively for children
 Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 	
@@ -1027,6 +1042,15 @@ void InstructionNodeLeaf::update_weight(const StepUpdateInfo& p){
 		InstructionNode::update_weight(p);
 		pc_map[p.pc]++; //if key does not exist, it is created with value 0 
 	}
+
+nlohmann::ordered_json InstructionNodeLeaf::to_json(){
+	nlohmann::ordered_json additional_fields;
+	additional_fields["PCs"] = pc_map;
+
+	nlohmann::json base_class_json = InstructionNode::to_json();
+	base_class_json.update(additional_fields);
+	return base_class_json;
+}
 
 MemoryNode::MemoryNode(bool is_store_instruction) : is_store(is_store_instruction){
 }
@@ -1371,6 +1395,31 @@ std::vector<BranchingPoint> InstructionNodeR::find_variant_branch(Path path, uin
 	}
 }
 
+NODE_TYPE InstructionNodeR::get_node_type(){
+	return NODE_TYPE::NODE;
+}
+
+NODE_TYPE InstructionNodeLeaf::get_node_type(){
+	return NODE_TYPE::LEAF;
+}
+
+NODE_TYPE InstructionNodeBranch::get_node_type(){
+	return NODE_TYPE::BRANCH_R;
+}
+
+NODE_TYPE InstructionNodeBranchLeaf::get_node_type(){
+	return NODE_TYPE::BRANCH_L;
+}
+
+NODE_TYPE InstructionNodeMemory::get_node_type(){
+	return NODE_TYPE::MEMORY_R;
+}
+
+NODE_TYPE InstructionNodeMemoryLeaf::get_node_type(){
+	return NODE_TYPE::MEMORY_L;
+}
+
+
 PathNode::PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, 
 					std::map<uint64_t, int> pcs, 
 					std::array<bool, INSTRUCTION_TREE_DEPTH> dep_true, std::set<int8_t> dep_out, std::set<int8_t> dep_anti) {
@@ -1393,21 +1442,21 @@ PathNode::PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float scor
 			}
 			// output_dependencies = dep_out;
 			// anti_dependencies = dep_anti;
-			for (int offset : dep_out)
-			{
-				// if(offset>0){
-				// 	printf("[ERROR] Found output dependency offset to future node");
-				// }
-				output_dependencies.insert(offset);
-			}
-			for (int offset : dep_anti)
-			{
-				// if(offset>0){
-				// 	printf("[ERROR] Found output dependency offset to future node");
-				// }
-				anti_dependencies.insert(offset);
-			}
-			}
+		}
+		for (int offset : dep_out) //TODO check again if this is correct and refactor
+		{
+			// if(offset>0){
+			// 	printf("[ERROR] Found output dependency offset to future node");
+			// }
+			output_dependencies.insert(offset);
+		}
+		for (int offset : dep_anti)
+		{
+			// if(offset>0){
+			// 	printf("[ERROR] Found output dependency offset to future node");
+			// }
+			anti_dependencies.insert(offset);
+		}
 }
 
 nlohmann::json PathNode::to_json(){
