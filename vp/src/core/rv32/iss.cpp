@@ -2494,176 +2494,190 @@ void ISS::show() {
 	}
 
 	
-	//print some additional info
+	float total_percent = 1.0;
+	if(discovered_sequences.empty()){
+		printf("[Warning] Ringbuffer was not filled at least once. \nThis means, the whole program fits into one sequence. \nYou probably want to execute a longer program or decrease the tree bound.\n");
 
-	float total_percent = (float)discovered_sequences.back().minimum_weight * (float)discovered_sequences.back().length / (float)csrs.instret.reg;
-	std::cout << "inverse dependency score " << discovered_sequences.back().inverse_dependency_score << std::endl;
-	std::cout << "partially normalized potential " << discovered_sequences.back().get_normalized_score() << std::endl;
-	std::cout << "normalized potential " << discovered_sequences.back().get_normalized_score() * total_percent * 100 << std::endl;
-
-	std::list<Opcode::Mapping> unused_instructions; 
-	for (size_t i = Opcode::Mapping::ADD; i < Opcode::Mapping::NUMBER_OF_INSTRUCTIONS; i++)
-	{
-		Opcode::Mapping c_op = (Opcode::Mapping)i;
-		bool found = false;
-		for (InstructionNodeR& tree : instruction_trees){
-			if(tree.instruction == c_op){
-				found = true;
-			}
-		}
-		if(!found){
-			unused_instructions.emplace_back(c_op);
-		}
-	}
-	std::cout << "\n[Unused Instructions]" << std::endl;
-	if(unused_instructions.size()>0){
-		// for (auto &&unused_ins : unused_instructions)
-		// {
-		// 	std::cout << Opcode::mappingStr[unused_ins] << std::endl;
-		// }
-		std::cout << unused_instructions.size() << std::endl;
 	}else{
-		std::cout << "- NONE -" << std::endl;
-	}
+		//print some additional info
+		total_percent = (float)discovered_sequences.back().minimum_weight * (float)discovered_sequences.back().length / (float)csrs.instret.reg;
+		std::cout << "inverse dependency score " << discovered_sequences.back().inverse_dependency_score << std::endl;
+		std::cout << "partially normalized potential " << discovered_sequences.back().get_normalized_score() << std::endl;
+		std::cout << "normalized potential " << discovered_sequences.back().get_normalized_score() * total_percent * 100 << std::endl;
 
-
-	//evaluate additional score functions
-	LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
-	std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
-	if(sf_lib.handle){
-		if(sf_lib.functions.size() > 0){//TODO 
-			score_functions = sf_lib.functions;
-
-			 // Access the score_functions array and call the functions
-			std::cout << "Testing loaded score functions: " << std::endl;
-			for (const auto& func : score_functions) {
-				std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
+		std::list<Opcode::Mapping> unused_instructions; 
+		for (size_t i = Opcode::Mapping::ADD; i < Opcode::Mapping::NUMBER_OF_INSTRUCTIONS; i++)
+		{
+			Opcode::Mapping c_op = (Opcode::Mapping)i;
+			bool found = false;
+			for (InstructionNodeR& tree : instruction_trees){
+				if(tree.instruction == c_op){
+					found = true;
+				}
 			}
-
+			if(!found){
+				unused_instructions.emplace_back(c_op);
+			}
+		}
+		std::cout << "\n[Unused Instructions]" << std::endl;
+		if(unused_instructions.size()>0){
+			// for (auto &&unused_ins : unused_instructions)
 			// {
-			//     [](ScoreParams p) -> float {
-			// 		float score = ((p.length * p.weight) * p.score_multiplier 
-			// 			+ p.weight * p.score_bonus); //length * minimum_weight;
-			// 		return score;
-			// 	},
-			//     [](ScoreParams p) -> float {
-			// 		float score = ((p.length * p.weight) * p.score_multiplier 
-			// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
-			// 		return score;
-			// 	},
-			//     [](ScoreParams p) -> float {
-			// 		float score = ((p.length * p.weight) * p.score_multiplier 
-			// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
-			// 		return score;
-			// 	}
-			// };
+			// 	std::cout << Opcode::mappingStr[unused_ins] << std::endl;
+			// }
+			std::cout << unused_instructions.size() << std::endl;
 		}else{
-			std::cout << "Error loading scoring functions from library\nSkipping additional scoring functions" << std::endl;
+			std::cout << "- NONE -" << std::endl;
 		}
-	}else{
-		std::cout << "Could not find library at default path\nSkipping additional scoring functions" << std::endl;
-	}
-	
-
-   
 
 
-	if(interactive_mode){
-		printf("start score function analysis\n");
-		int run_id = 0;
-
-		while (true) {
-			std::cout << "\nEnter \n" 
-						<< "\t'a' to run tree analysis\n"
-						<< "\t'b' to run analysis performance benchmark\n"
-						<< "\t'r' to reload the library\n" 
-						<< "\t'p [% threshold]' to prune trees\n" 
-						<< "\t'd' to export as dot\n" 
-						<< "\t'e' for a full export as json\n" 
-						<< "\t'q' to quit\n" 
-						<< ":"<< std::endl;
-			std::string userInput; 
-			std::cin >> userInput;
-			char mode = userInput[0];
-
-			if (mode == 'r') {
-				// Reload the library and get the updated array of functions
-				dlclose(sf_lib.handle);
-				std::string library_path = 
-						"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
-				sf_lib = load_scoring_functions(library_path);
+		//evaluate additional score functions
+		LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
+		std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
+		if(sf_lib.handle){
+			if(sf_lib.functions.size() > 0){//TODO 
 				score_functions = sf_lib.functions;
-				//TODO add checks for library and allow to specify custom path
-				run_id++;
-			} 
-			else if(mode == 'a'){ //run analysis
-				analyze_trees(score_functions, instruction_trees);
-			} 
-			else if(mode == 'b'){ //run analysis benchmark
-				using std::chrono::high_resolution_clock;
-				using std::chrono::duration;
-				using std::chrono::milliseconds;
 
-				auto time_analysis1 = high_resolution_clock::now();
-				for (size_t i = 0; i < 100; i++)
-				{
-					analyze_trees(score_functions, instruction_trees);
+				// Access the score_functions array and call the functions
+				std::cout << "Testing loaded score functions: " << std::endl;
+				for (const auto& func : score_functions) {
+					std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
 				}
-				auto time_analysis2 = high_resolution_clock::now();
-				duration<double, std::milli> ms_double = time_analysis2 - time_analysis1;
 
-				std::cout << "Analysis of 300  SF took " << ms_double.count() << "ms\n" 
-					<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
-			} 
-			else if (mode == 'q') {
-				dlclose(sf_lib.handle);
-				break;
-			} 
-			else if (mode == 'p') {
-				float prune_threshold = PRUNE_THRESHOLD_WEIGHT;
-				if(userInput.length() > 1){
-					try {
-						prune_threshold = std::stof(userInput.substr(1))/100.0;
-						std::cout << "Start pruning trees with threshold " << prune_threshold << std::endl;
-					} catch (const std::invalid_argument& e) {
-						std::cout << "No valid threshold specified. Set to default (" << PRUNE_THRESHOLD_WEIGHT << ")" << std::endl;
-					}
-				}
-				for (auto &&tree : instruction_trees)
-				{
-					printf("\tPruning with absolute threshold: %f\n", tree.weight * prune_threshold);
-					tree.prune_tree(tree.weight * prune_threshold, 0);	
-				}
-			} 
-			else if (mode == 'd') {
-				printf("exporting trees to dot\n");
-				std::streambuf *cout_save = std::cout.rdbuf();
-				output_dot(cout_save);
+				// {
+				//     [](ScoreParams p) -> float {
+				// 		float score = ((p.length * p.weight) * p.score_multiplier 
+				// 			+ p.weight * p.score_bonus); //length * minimum_weight;
+				// 		return score;
+				// 	},
+				//     [](ScoreParams p) -> float {
+				// 		float score = ((p.length * p.weight) * p.score_multiplier 
+				// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
+				// 		return score;
+				// 	},
+				//     [](ScoreParams p) -> float {
+				// 		float score = ((p.length * p.weight) * p.score_multiplier 
+				// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
+				// 		return score;
+				// 	}
+				// };
+			}else{
+				std::cout << "Error loading scoring functions from library\nSkipping additional scoring functions" << std::endl;
 			}
-			else if (mode == 'e') {
-				printf("exporting trees to json\n");
-				std::streambuf *cout_save = std::cout.rdbuf();
-				output_full(cout_save);
-			} 
-			else {
-				std::cout << "Invalid input." << std::endl;
+		}else{
+			std::cout << "Could not find library at default path\nSkipping additional scoring functions" << std::endl;
+		}
+		
+
+	
+
+
+		if(interactive_mode){
+			printf("start score function analysis\n");
+			int run_id = 0;
+
+			while (true) {
+				std::cout << "\nEnter \n" 
+							<< "\t'a' to run tree analysis\n"
+							<< "\t'b' to run analysis performance benchmark\n"
+							<< "\t'r' to reload the library\n" 
+							<< "\t'p [% threshold]' to prune trees\n" 
+							<< "\t'd' to export as dot\n" 
+							<< "\t'e' for a full export as json\n" 
+							<< "\t'q' to quit\n" 
+							<< ":"<< std::endl;
+				std::string userInput; 
+				std::cin >> userInput;
+				char mode = userInput[0];
+
+				if (mode == 'r') {
+					// Reload the library and get the updated array of functions
+					dlclose(sf_lib.handle);
+					std::string library_path = 
+							"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
+					sf_lib = load_scoring_functions(library_path);
+					score_functions = sf_lib.functions;
+					//TODO add checks for library and allow to specify custom path
+					run_id++;
+				} 
+				else if(mode == 'a'){ //run analysis
+					analyze_trees(score_functions, instruction_trees);
+				} 
+				else if(mode == 'b'){ //run analysis benchmark
+					using std::chrono::high_resolution_clock;
+					using std::chrono::duration;
+					using std::chrono::milliseconds;
+
+					auto time_analysis1 = high_resolution_clock::now();
+					for (size_t i = 0; i < 100; i++)
+					{
+						analyze_trees(score_functions, instruction_trees);
+					}
+					auto time_analysis2 = high_resolution_clock::now();
+					duration<double, std::milli> ms_double = time_analysis2 - time_analysis1;
+
+					std::cout << "Analysis of 300  SF took " << ms_double.count() << "ms\n" 
+						<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
+				} 
+				else if (mode == 'q') {
+					dlclose(sf_lib.handle);
+					break;
+				} 
+				else if (mode == 'p') {
+					float prune_threshold = PRUNE_THRESHOLD_WEIGHT;
+					if(userInput.length() > 1){
+						try {
+							prune_threshold = std::stof(userInput.substr(1))/100.0;
+							std::cout << "Start pruning trees with threshold " << prune_threshold << std::endl;
+						} catch (const std::invalid_argument& e) {
+							std::cout << "No valid threshold specified. Set to default (" << PRUNE_THRESHOLD_WEIGHT << ")" << std::endl;
+						}
+					}
+					for (auto &&tree : instruction_trees)
+					{
+						printf("\tPruning with absolute threshold: %f\n", tree.weight * prune_threshold);
+						tree.prune_tree(tree.weight * prune_threshold, 0);	
+					}
+				} 
+				else if (mode == 'd') {
+					printf("exporting trees to dot\n");
+					std::streambuf *cout_save = std::cout.rdbuf();
+					output_dot(cout_save);
+				}
+				else if (mode == 'e') {
+					printf("exporting trees to json\n");
+					std::streambuf *cout_save = std::cout.rdbuf();
+					output_full(cout_save);
+				} 
+				else {
+					std::cout << "Invalid input." << std::endl;
+				}
 			}
 		}
+		
+		//close library
+		if(sf_lib.handle){
+			dlclose(sf_lib.handle);
+		}
 	}
-	
-	//close library
-	if(sf_lib.handle){
-		dlclose(sf_lib.handle);
-	}
-
 	std::cout << "total instructions: " << csrs.instret.reg << "(" << total_num_instr << ")" << " [" << total_percent*100 << "]" << std::endl;
 	std::cout << "total cycles: " << _compute_and_get_current_cycles() << std::endl;
 
-	std::cout << "Best sequence: " << Opcode::mappingStr[discovered_sequences.back().opcodes[0]] 
-	<< "\nLength: " << discovered_sequences.back().length 
-	<< "\nWeight: " << discovered_sequences.back().minimum_weight
-	<< "\nTotal/\%: " << csrs.instret.reg << "K[" << total_percent*100 << "]"
-	<< "\nNP: " << discovered_sequences.back().get_normalized_score() << std::endl;
+	if(discovered_sequences.empty()){
+		std::cout << "Best sequence: " << "NONE (the whole program fits into one sequence)" 
+		<< "\nLength: " << csrs.instret.reg 
+		<< "\nWeight: " << 1 
+		<< "\n%:      [" << total_percent*100 << "]"
+		<< "\nTotal:  " << csrs.instret.reg
+		<< "\nNP:     1.0" << std::endl;
+	}else{
+		std::cout << "Best sequence: " << Opcode::mappingStr[discovered_sequences.back().opcodes[0]] 
+		<< "\nLength: " << discovered_sequences.back().length 
+		<< "\nWeight: " << discovered_sequences.back().minimum_weight
+		<< "\n%:      [" << total_percent*100 << "]"
+		<< "\nTotal:  " << csrs.instret.reg
+		<< "\nNP:     " << discovered_sequences.back().get_normalized_score() << std::endl;
+	}
 	// std::cout << "$ " << Opcode::mappingStr[discovered_sequences.back().opcodes[0]] 
 	// << " & " << discovered_sequences.back().length 
 	// << " & " << discovered_sequences.back().minimum_weight
