@@ -1993,6 +1993,43 @@ struct LoadedLibrary {
     std::array<ScoreFunction, SF_BATCH_SIZE> functions;
 };
 
+void ISS::flush_ringbuffer(){
+	for (size_t offset = 1; offset < INSTRUCTION_TREE_DEPTH; offset++) //TODO check if this has to start at index 0
+	{
+		ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
+
+		//advance ringbuffer index and insert current instruction into tree (as if it were the oldest entry)
+		Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;
+		if(oldest_op){//ring buffer was not completely filled - just skip this entry 
+			//check if a tree for this op already exists
+			InstructionNodeR* found_tree = NULL;
+			for (InstructionNodeR& root : instruction_trees){
+				
+				if(root.instruction == oldest_op){
+					found_tree = &root;
+					break;
+				}
+			}
+			if(found_tree!=NULL){
+			}else{
+				// printf("first occurance of op %d during flush\n", oldest_op);
+				instruction_trees.emplace_back(oldest_op, 0);
+				found_tree = &instruction_trees.back();
+			}
+			//printf("flush: inserting with offset %d\n", offset);
+
+			//insert ringbuffer - this opcode into tree
+			found_tree->insert_rb(last_executed_steps, 
+								ring_buffer_index, offset);
+		}
+		// else{
+		// 	printf("flush: skipping empty entry at offset %d\n", offset);
+		// }
+	}
+	
+	
+}
+
 LoadedLibrary load_scoring_functions(const std::string& libraryPath){
 	void* library = dlmopen(-1, libraryPath.c_str(), RTLD_NOW); // | RTLD_GLOBAL
 	std::cout << "Loading library from: " << libraryPath << std::endl;
@@ -2348,6 +2385,7 @@ void ISS::output_full(std::streambuf *cout_save){
 }
 
 void ISS::show() {
+	flush_ringbuffer();//insert all instructions currently in the ringbuffer into their trees
 	boost::io::ios_flags_saver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
 	std::cout << "simulation time: " << sc_core::sc_time_stamp() << std::endl;

@@ -45,7 +45,12 @@ InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_
 
 void InstructionNodeR::insert_rb(
 				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps, 
-				uint8_t next_rb_index){
+				uint32_t next_rb_index){
+					insert_rb(last_executed_steps, next_rb_index, 0);
+				}
+void InstructionNodeR::insert_rb(
+				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps, 
+				uint32_t next_rb_index, uint32_t offset){
 	//printf("insert instructions from ringbuffer with len %ld\n", last_executed_instructions.size());
 	
 	//insert each element of the ringbuffer in order into the tree
@@ -82,10 +87,13 @@ void InstructionNodeR::insert_rb(
 	std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
 	std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
 
-	for (uint32_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//update the root node and insert all other nodes
+	for (uint32_t i = 0; i < INSTRUCTION_TREE_DEPTH-offset; i++)//update the root node and insert all other nodes
 	{
 		uint8_t rb_index = (next_rb_index+i)%INSTRUCTION_TREE_DEPTH;
 		ExecutionInfo* current_step = &last_executed_steps[rb_index];
+		if(current_step->last_executed_instruction==Opcode::UNDEF){
+			printf("[WARNING] trying to insert zero opcode into tree at index %d with offset %d\n", i, offset);
+		}
 
 		std::tuple<uint16_t,uint16_t,uint16_t> regs = current_step->last_registers;
 

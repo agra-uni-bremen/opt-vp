@@ -388,6 +388,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	void run() override;
 
+	void flush_ringbuffer();
+
 	void output_dot(std::streambuf *cout_save);
 	void output_csv(std::streambuf *cout_save);
 	void output_json(std::streambuf *cout_save, 

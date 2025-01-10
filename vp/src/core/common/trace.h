@@ -721,7 +721,9 @@ class InstructionNodeR : virtual public InstructionNode{
 		std::list<InstructionNode*> children;
 
 		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
-						uint8_t next_rb_index);
+						uint32_t next_rb_index);
+		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
+						uint32_t next_rb_index, uint32_t offset);
 
 		InstructionNode* insert(const StepInsertInfo& p) override;
 
