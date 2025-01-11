@@ -2182,7 +2182,7 @@ void ISS::output_csv(std::streambuf *cout_save){
 			std::string single_output_filename = "";
 
 			std::string file_path = std::string(input_filename);
-			std::string application_name = file_path.substr(file_path.find_last_of("\//")+1);
+			std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
 			
 			std::cout << "writing csv files to directory " << output_filename << std::endl;
 			single_output_filename = output_filename + 
@@ -2328,7 +2328,7 @@ void ISS::output_json(std::streambuf *cout_save,
 			std::cout << "writing json to directory " << output_filename << std::endl;
 
 			std::string file_path = std::string(input_filename);
-			std::string application_name = file_path.substr(file_path.find_last_of("\//")+1);
+			std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
 
 			single_output_filename = output_filename + 
 									std::string("sequences_") + 

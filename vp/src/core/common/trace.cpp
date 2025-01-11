@@ -1007,7 +1007,7 @@ std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const ch
 			name << "pruned_" << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
 			
 			dot_stream << name.str(); 
-			float per_weight = (float)weight/(float)tree_weight;
+			//float per_weight = (float)weight/(float)tree_weight;
 			uint16_t color_index = 1; //9 colors (1-9) TODO configure rounding
 			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
 			<< "<TR><TD>" 
@@ -1259,7 +1259,7 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 			name << "pruned_" << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
 			
 			dot_stream << name.str(); 
-			float per_weight = (float)weight/(float)tree_weight;
+			//float per_weight = (float)weight/(float)tree_weight;
 			uint16_t color_index = 1; //9 colors (1-9) TODO configure rounding
 			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
 			<< "<TR><TD>" << label << "</TD></TR>" 
@@ -1360,13 +1360,13 @@ std::vector<PathNode> InstructionNodeR::path_to_path_nodes(Path path, uint depth
 
 //find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
 // and another possible branch not taken, which would lead to a different sequence 
-std::vector<BranchingPoint> InstructionNodeR::find_variant_branch(Path path, uint depth){//uint8_t variant_index
+std::vector<BranchingPoint> InstructionNodeR::find_variant_branch(Path path, uint8_t depth){//uint8_t variant_index
 	//find branching point
 	//then create new Path up to this point and extend_path()
 
 	std::vector<BranchingPoint> branching_points; 
 
-	if((depth+1)>=path.length){ //path.opcodes[depth+1] == Opcode::UNDEF){
+	if((uint32_t)(depth+1)>=path.length){ //path.opcodes[depth+1] == Opcode::UNDEF){
 		return branching_points;
 	}
 	else{
