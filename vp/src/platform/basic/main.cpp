@@ -238,6 +238,9 @@ int sc_main(int argc, char **argv) {
 	sensor2.plic = &plic;
 	ethernet.plic = &plic;
 
+	//TODO make this a cl option
+	core.csrs.mstatus.fields.fs = 1;
+
 	std::vector<debug_target_if *> threads;
 	threads.push_back(&core);
 
