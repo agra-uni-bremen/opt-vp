@@ -24,6 +24,8 @@
 //#define debug_register_dependencies
 //#define debug_dependencies
 
+//#define dot_pc_on_pruned_nodes
+
 // extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
 
 // Opcode::Type getType(Opcode::Mapping mapping);

@@ -1032,6 +1032,7 @@ std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const ch
 			<< std::hex << "pruned" << std::dec 
 			<< "</FONT></TD></TR>" 
 
+			#ifdef dot_pc_on_pruned_nodes
 			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
 			for (auto const& x : pc_map)
 			{
@@ -1039,9 +1040,9 @@ std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const ch
 			}
 				
 			dot_stream << std::dec 
-			<< "</FONT></TD></TR></TABLE>" 
-
-			<< ">, color=" 
+			<< "</FONT></TD></TR>" 
+			#endif
+			<< "</TABLE>" << ">, color=" 
 			<< color_index << "]" 
 			<< std::endl;
 
@@ -1300,16 +1301,17 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 			<< "<TR><TD>" << label << "</TD></TR>" 
 			<< "<TR><TD><FONT COLOR=\"0.8 0.0 0.1\" POINT-SIZE=\"14\"> pruned </FONT></TD></TR>"
 
+			#ifdef dot_pc_on_pruned_nodes
 			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
 			for (auto const& x : pc_map)
 			{
 				dot_stream  << x.first << ":" << x.second << " "; 
 			}
-				
+			
 			dot_stream << std::dec 
-			<< "</FONT></TD></TR></TABLE>" 
-
-			<< ">, color=" 
+			<< "</FONT></TD></TR>" 
+			#endif
+			<< "</TABLE>" << ">, color=" 
 			<< color_index << "]" 
 			<< std::endl;
 
