@@ -22,6 +22,7 @@
 #define trace_pcs
 #define log_pcs
 //#define debug_register_dependencies
+//#define debug_dependencies
 
 // extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
 

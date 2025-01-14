@@ -44,12 +44,12 @@ InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_
 }
 
 void InstructionNodeR::insert_rb(
-				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps, 
+				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps_p, 
 				uint32_t next_rb_index){
-					insert_rb(last_executed_steps, next_rb_index, 0);
+					insert_rb(last_executed_steps_p, next_rb_index, 0);
 				}
 void InstructionNodeR::insert_rb(
-				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps, 
+				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps_p, 
 				uint32_t next_rb_index, uint32_t offset){
 	//printf("insert instructions from ringbuffer with len %ld\n", last_executed_instructions.size());
 	
@@ -87,10 +87,14 @@ void InstructionNodeR::insert_rb(
 	std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
 	std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
 
+	#ifdef debug_dependencies
+	printf("---------------\nChecking dependencies\n---------------\n");
+	#endif
+
 	for (uint32_t i = 0; i < INSTRUCTION_TREE_DEPTH-offset; i++)//update the root node and insert all other nodes
 	{
 		uint8_t rb_index = (next_rb_index+i)%INSTRUCTION_TREE_DEPTH;
-		ExecutionInfo* current_step = &last_executed_steps[rb_index];
+		ExecutionInfo* current_step = &last_executed_steps_p[rb_index];// [rb_index];
 		if(current_step->last_executed_instruction==Opcode::UNDEF){
 			printf("[WARNING] trying to insert zero opcode into tree at index %d with offset %d\n", i, offset);
 		}
@@ -158,7 +162,9 @@ void InstructionNodeR::insert_rb(
 		//update access arrays after checking for dependencies
 		//Load Store are an exception as dependencies are checked here to avid an extra type check
 
-
+		#ifdef debug_dependencies
+		printf("[%s]--\n", Opcode::mappingStr[current_step->last_executed_instruction]);
+		#endif
 		switch (type)
 		{
 		case Type::R :
@@ -181,6 +187,9 @@ void InstructionNodeR::insert_rb(
 			register_dependencies_anti[rs1].set(i, true);
 
 			l_read = current_step->last_memory_read; 
+			#ifdef debug_dependencies
+			printf("  Reads memory: %lx\n", l_read);
+			#endif
 			if(l_read){
 				load_store_dirty = true;
 				// printf("read %s\n", Opcode::mappingStr[current_step->last_executed_instruction]);
@@ -191,7 +200,9 @@ void InstructionNodeR::insert_rb(
 						//found Store instruction that accesses the same address
 						memory_true_dependency = i-j; //TODO check again if this results in the correct index
 						tmp_true_dependency2 = i-j; //just use default true_dependency for now
-						printf("found memory true dependency with idx %d\n", i-j);
+						#ifdef debug_dependencies
+						printf("  found memory true dependency with offset -%d\n", i-j);
+						#endif
 						break;
 					}
 				}
@@ -207,11 +218,15 @@ void InstructionNodeR::insert_rb(
 		case Type::S :
 			/* rs1, rs2, memory TODO*/
 			// Store Instructions
-			// printf(Opcode::mappingStr[current_step->last_executed_instruction]);
 
 			l_read = current_step->last_memory_read; 
+			if(l_read != 0){
+				printf("[ERROR] Found memory read for store instruction: %lx\n", l_read);
+			}
 			l_store = current_step->last_memory_written;
-			// printf("READ:  %x\nWRITE: %x\n----\n", l_read, l_store);
+			#ifdef debug_dependencies
+			printf("  Writes memory: %lx\n", l_store);
+			#endif
 			//first check for dependencies
 			//if address !=0 (either store or load is always 0 as this identifies the access type)
 			//start at index-1 and traverse backwards until identical address is found or end is reached
@@ -231,7 +246,7 @@ void InstructionNodeR::insert_rb(
 				//check stores
 				if(l_store==0){
 					//TODO should never be 0
-					// printf("[ERROR] memory operation without access\n");
+					printf("[ERROR] memory operation without access\n");
 				}else{
 					memory_store[i] = l_store;
 					for (int j = i-1; j >= 0; j--)
@@ -240,7 +255,9 @@ void InstructionNodeR::insert_rb(
 							//found Store instruction that accesses the same address
 							memory_output_dependency = i-j;
 							output_dependencies.set(i - j,true);
-							printf("found memory output dependency with idx %d\n", i-j);
+							#ifdef debug_dependencies
+							printf("  found memory output dependency with offset -%d\n", i-j);
+							#endif
 							break;
 						}
 					}
@@ -251,7 +268,9 @@ void InstructionNodeR::insert_rb(
 							//found Load instruction that accesses the same address
 							memory_anti_dependency = i-j;
 							anti_dependencies.set(i - j,true);
-							printf("found memory anti dependency with idx %d\n", i-j);
+							#ifdef debug_dependencies
+							printf("  found memory anti dependency with offset -%d\n", i-j);
+							#endif
 							break;
 						}
 					}
@@ -517,7 +536,6 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 		<< "</FONT></TD></TR>"
 
 		<< "<TR><TD>";
-
 		uint dependencies_count = 0;
 		for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
 		{
@@ -536,9 +554,6 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 	 		// e-> a[constraint=false, style="dashed" color="0.6 0.6 1.000"]
 		}
 		//printf("num dependencies_true_: %d\n", dependencies_count);
-		
-
-
 		dot_stream << "</TD></TR>";
 		
 		//inlcude used registers
@@ -1134,15 +1149,35 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 		dot_stream << name.str(); 
 		float per_weight = (float)weight/(float)tree_weight;
 		uint16_t color_index = per_weight * 8 + 0.1 + 1; //9 colors (1-9) TODO configure rounding
+		
 		dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
 		<< "<TR><TD>" 
 		<< label 
 		<< "</TD></TR>" 
+
+		<< "<TR><TD>";
+		uint dependencies_count = 0;
+		for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
+		{
+			if(dependencies_true_[i]){
+				dependencies_count++;
+				dot_stream << "<FONT COLOR=\"" 
+				<< dot_hue(depth-i) << " " << dot_sat(depth-i,0) << " " << dot_val(depth,0) << "\">" 
+				<< i << " \n" << "</FONT>";
+			}
+		}
+		dot_stream << "</TD></TR>"
+
 		<< "<TR><TD><FONT COLOR=\"0.6 0.6 1.000\" POINT-SIZE=\"10\">" 
 		<< std::hex << subtree_hash << std::dec 
 		<< "</FONT></TD></TR>"
 		<< "<TR><TD><FONT COLOR=\"0.2 0.8 1.000\" POINT-SIZE=\"10\">" 
-		<< (int)memory_location
+		<< (int)memory_location << ": ";
+		for (auto &&i : this->memory_accesses)
+		{
+			dot_stream << "[" << i.first << "x : " << std::hex << (i.second & 0xFFFF) << "]" << std::dec;
+		}
+		dot_stream 
 		<< "</FONT></TD></TR></TABLE>" 
 		<< ">, color=" 
 		<< color_index << "]" 

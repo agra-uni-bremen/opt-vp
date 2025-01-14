@@ -222,7 +222,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	uint64_t prev_cycles = 0;
 
 	std::map<uint64_t, std::tuple<uint64_t,uint64_t>> memory_access_map; //map mem -> write_access | load_access
-	std::tuple<uint64_t, AccessType> last_memory_access = {0, AccessType::NONE}; //address, is_store = 2 is_load = 1 no_memory_access=0
+	std::tuple<uint64_t, AccessType> last_memory_access = {-1, AccessType::NONE}; //address, is_store = 2 is_load = 1 no_memory_access=0
 
 	uint8_t ring_buffer_index =  0;
 	CoreExecStatus status = CoreExecStatus::Runnable;
