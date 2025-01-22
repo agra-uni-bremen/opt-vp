@@ -18,6 +18,7 @@ public:
 	bool output_as_dot = false;
 	bool output_as_json = false;
 	bool output_as_csv = false;
+	bool output_full_export = false;
 	bool interactive_mode = false;
 
 	bool intercept_syscalls = false;

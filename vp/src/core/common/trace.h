@@ -21,7 +21,7 @@
 
 #define trace_pcs
 #define log_pcs
-//#define debug_register_dependencies
+// #define debug_register_dependencies
 //#define debug_dependencies
 
 //#define dot_pc_on_pruned_nodes

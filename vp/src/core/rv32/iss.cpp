@@ -2435,6 +2435,9 @@ void ISS::show() {
 	if(output_as_csv){
 		output_csv(cout_save);
 	}
+	if(output_full_export){
+		output_full(cout_save);
+	}
 
 	//find best instruction squence for each tree
 	std::vector<Path> discovered_sequences; 

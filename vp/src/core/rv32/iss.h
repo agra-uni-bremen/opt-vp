@@ -197,6 +197,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	bool output_as_dot = false;
 	bool output_as_csv = false;
 	bool output_as_json = false;
+	bool output_full_export = false;
 	bool interactive_mode = false;
 
 	// last decoded and executed instruction and opcode
