@@ -187,10 +187,10 @@ void InstructionNodeR::insert_rb(
 			register_dependencies_anti[rs1].set(i, true);
 
 			l_read = current_step->last_memory_read; 
-			#ifdef debug_dependencies
-			printf("  Reads memory: %lx\n", l_read);
-			#endif
 			if(l_read){
+				#ifdef debug_dependencies
+				printf("  Reads memory: %lx\n", l_read);
+				#endif
 				load_store_dirty = true;
 				// printf("read %s\n", Opcode::mappingStr[current_step->last_executed_instruction]);
 				memory_load[i] = l_read;

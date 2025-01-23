@@ -726,6 +726,7 @@ void ISS::exec_step() {
 			uint32_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<4, true>(addr);
 			fp_regs.write(RD, float32_t{(uint32_t)mem->load_word(addr)});
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::FSW: {
@@ -733,6 +734,7 @@ void ISS::exec_step() {
 			uint32_t addr = regs[instr.rs1()] + instr.S_imm();
 			trap_check_addr_alignment<4, false>(addr);
             mem->store_word(addr, fp_regs.u32(RS2));
+			log_memory_store(addr, last_pc);
 		} break;
 
 		case Opcode::FADD_S: {
