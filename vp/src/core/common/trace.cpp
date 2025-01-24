@@ -145,19 +145,19 @@ void InstructionNodeR::insert_rb(
 
 
 		Type type = getType(current_step->last_executed_instruction);
-		if(type != Type::S) //Store instructions don't use rd
-		for (size_t offset_idx = 0; offset_idx < i; offset_idx++)
-		{
-			// calculate anti dependencies 
-			if(register_dependencies_anti[rd][offset_idx]){
-				anti_dependencies.set(i - offset_idx, true);
-			}
-			//calculate output dependencies 
-			if(register_dependencies_output[rd][offset_idx]){
-				output_dependencies.set(i - offset_idx,true);
+		if(type != Type::S){ //Store instructions don't use rd
+			for (size_t offset_idx = 0; offset_idx < i; offset_idx++)
+			{
+				// calculate anti dependencies 
+				if(register_dependencies_anti[rd][offset_idx]){
+					anti_dependencies.set(i - offset_idx, true);
+				}
+				//calculate output dependencies 
+				if(register_dependencies_output[rd][offset_idx]){
+					output_dependencies.set(i - offset_idx,true);
+				}
 			}
 		}
-
 
 		//update access arrays after checking for dependencies
 		//Load Store are an exception as dependencies are checked here to avid an extra type check
