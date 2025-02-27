@@ -198,6 +198,7 @@ void ISS::exec_step() {
 
 	//insert into tree of oldest instruction, which will be overwritten in the next step
 	Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;
+	#ifndef single_trace_mode
 	if(oldest_op){//ring buffer is still being filled if this is false
 		//check if a tree for this op already exists
 		InstructionNodeR* found_tree = NULL;
@@ -221,6 +222,17 @@ void ISS::exec_step() {
 		found_tree->insert_rb(last_executed_steps, 
 							ring_buffer_index);
 	}
+	#else
+	if(oldest_op){
+		InstructionNodeR* found_tree;
+		if(instruction_trees.empty()){
+			instruction_trees.emplace_back(oldest_op, 0);
+		}
+		found_tree = &instruction_trees.back();
+		found_tree->insert_rb(last_executed_steps, 
+			ring_buffer_index);
+		}
+	#endif
 
 	if (trace) {
 		printf("core %2u: prv %1x: pc %8x: %s ", csrs.mhartid.reg, prv, last_pc, Opcode::mappingStr[op]);
@@ -253,7 +265,7 @@ void ISS::exec_step() {
 		puts("");
 	}
 
-		//printf("OP: %s\n", Opcode::mappingStr[op]);
+		//printf("[%x] OP: %s\n", last_pc, Opcode::mappingStr[op]);
 
 	switch (op) {
 		case Opcode::UNDEF:
@@ -2420,7 +2432,9 @@ void ISS::output_full(std::streambuf *cout_save){
 }
 
 void ISS::show() {
+	#ifndef single_trace_mode //ignore for stm TODO
 	flush_ringbuffer();//insert all instructions currently in the ringbuffer into their trees
+	#endif
 	boost::io::ios_flags_saver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
 	std::cout << "simulation time: " << sc_core::sc_time_stamp() << std::endl;
@@ -2444,6 +2458,7 @@ void ISS::show() {
 		output_full(cout_save);
 	}
 
+	#ifndef single_trace_mode
 	//find best instruction squence for each tree
 	std::vector<Path> discovered_sequences; 
 	std::vector<std::vector<Path>> discovered_sub_sequences;  //TODO currently not used
@@ -2607,7 +2622,6 @@ void ISS::show() {
 			std::cout << "- NONE -" << std::endl;
 		}
 
-
 		//evaluate additional score functions
 		LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
 		std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
@@ -2646,9 +2660,7 @@ void ISS::show() {
 		}
 		
 
-	
-
-
+		#endif
 		if(interactive_mode){
 			printf("start score function analysis\n");
 			int run_id = 0;
@@ -2668,6 +2680,7 @@ void ISS::show() {
 				char mode = userInput[0];
 
 				if (mode == 'r') {
+					#ifndef single_trace_mode
 					// Reload the library and get the updated array of functions
 					dlclose(sf_lib.handle);
 					std::string library_path = 
@@ -2694,10 +2707,13 @@ void ISS::show() {
 					duration<double, std::milli> ms_double = time_analysis2 - time_analysis1;
 
 					std::cout << "Analysis of 300  SF took " << ms_double.count() << "ms\n" 
-						<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
+					<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
+					#endif
 				} 
 				else if (mode == 'q') {
+					#ifndef single_trace_mode
 					dlclose(sf_lib.handle);
+					#endif
 					break;
 				} 
 				else if (mode == 'p') {
@@ -2732,10 +2748,13 @@ void ISS::show() {
 			}
 		}
 		
+		#ifndef single_trace_mode
 		//close library
 		if(sf_lib.handle){
 			dlclose(sf_lib.handle);
 		}
+		#endif
+		#ifndef single_trace_mode
 	}
 	std::cout << "total instructions: " << csrs.instret.reg << "(" << total_num_instr << ")" << " [" << total_percent*100 << "]" << std::endl;
 	std::cout << "total cycles: " << _compute_and_get_current_cycles() << std::endl;
@@ -2755,6 +2774,7 @@ void ISS::show() {
 		<< "\nTotal:  " << csrs.instret.reg
 		<< "\nNP:     " << discovered_sequences.back().get_normalized_score() << std::endl;
 	}
+	#endif
 	// std::cout << "$ " << Opcode::mappingStr[discovered_sequences.back().opcodes[0]] 
 	// << " & " << discovered_sequences.back().length 
 	// << " & " << discovered_sequences.back().minimum_weight

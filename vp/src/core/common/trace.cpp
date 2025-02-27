@@ -34,6 +34,26 @@ inline uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash){
 	return ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
 }
 
+#ifdef single_trace_mode
+InstructionNodeR* last_node;
+#endif
+
+#ifdef single_trace_mode
+//this function finds the last element in a tree
+//only used for single trace mode, where each node only has one child
+InstructionNodeR* InstructionNodeR::get_last(){
+	InstructionNodeR* last_node = this; 
+	printf("get last %s ", Opcode::mappingStr[last_node->instruction]);
+	while (last_node->children.size()>0)
+	{
+		last_node = children.back();
+		printf("->%s", Opcode::mappingStr[last_node->instruction]);
+	}
+	printf("\n");
+	
+	return last_node;
+}
+#endif
 //InstructionNodeR
 InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash)
 			: InstructionNode(instruction, parent_hash){
@@ -54,7 +74,18 @@ void InstructionNodeR::insert_rb(
 	//printf("insert instructions from ringbuffer with len %ld\n", last_executed_instructions.size());
 	
 	//insert each element of the ringbuffer in order into the tree
+	#ifndef single_trace_mode
+
 	InstructionNode *current_node = this;
+
+	#else
+	InstructionNodeR *current_node;
+	if(!last_node){
+		last_node = this;
+	}
+	current_node = last_node;//this->get_last();
+	
+	#endif
 
 	// InstructionNode *inserted_nodes[INSTRUCTION_TREE_DEPTH] = {};
 	// inserted_nodes[0] = this;
@@ -370,6 +401,7 @@ void InstructionNodeR::insert_rb(
 			if (access_type==AccessType::LOAD){
 				last_memory_access = current_step->last_memory_read;
 		}			
+	#ifndef single_trace_mode
 		if(i>0){//the root node already exists and is current_node
 			current_node = current_node->insert({				
 									current_step->last_executed_instruction, 
@@ -399,11 +431,30 @@ void InstructionNodeR::insert_rb(
 			current_step->last_frame_pointer
 			});
 		}
+	#endif
+	#ifdef single_trace_mode
+	// if(i==INSTRUCTION_TREE_DEPTH-2){
+	// 	printf("End of tree check: %s - %s", Opcode::mappingStr[current_node->instruction], Opcode::mappingStr[current_step->last_executed_instruction]);
+	// }
+	if(i==INSTRUCTION_TREE_DEPTH-1){//only insert the last node (as all other nodes are already in the tree)
+		last_node = last_node->insert({				
+								current_step->last_executed_instruction, 
+								current_step->last_executed_pc,
+								tmp_true_dependency1, tmp_true_dependency2,
+								output_dependencies,
+								anti_dependencies,
+								tmp_input1, tmp_input2, tmp_output, 
+								i, 
+								current_step->last_step_id, 
+								current_step->last_cycles
+								});
+	}
+	#endif
 	}
 
 	
 }
-
+#ifndef single_trace_mode
 InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 	InstructionNode* found_child = NULL;
 	for (auto child : children){
@@ -415,7 +466,7 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 	}
 	if(found_child==NULL){
 			switch (p.op)
-			{//TODO mark these at decoding time
+			{//TODO probably faster to mark these at decoding time
 			case Mapping::LB:
 			case Mapping::LBU:
 			case Mapping::LH:
@@ -428,7 +479,6 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 					children.push_back(new InstructionNodeMemoryLeaf(p.op, subtree_hash, p.pc, 0, false));
 				}
 				break;
-
 			case Mapping::SB:
 			case Mapping::SH:
 			case Mapping::SW:
@@ -469,6 +519,52 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 		
 		found_child = children.back();
 	}
+#else
+InstructionNodeR* InstructionNodeR::insert(const StepInsertInfo& p){
+	InstructionNodeR* found_child = NULL;
+	for (auto child : children){
+		
+		if(child->instruction == p.op){
+			found_child = child;
+			break;
+		}
+	}
+	if(found_child==NULL){
+			switch (p.op)
+			{//TODO probably faster to mark these at decoding time
+			case Mapping::LB:
+			case Mapping::LBU:
+			case Mapping::LH:
+			case Mapping::LHU:
+			case Mapping::LW:
+					children.push_back(new InstructionNodeMemory(p.op, subtree_hash,0,false));
+				break;
+			case Mapping::SB:
+			case Mapping::SH:
+			case Mapping::SW:
+					children.push_back(new InstructionNodeMemory(p.op, subtree_hash,0,true));
+				break;
+			
+			case Mapping::BEQ:
+			case Mapping::BNE:
+			case Mapping::BLT:
+			case Mapping::BLTU:
+			case Mapping::BGE:
+			case Mapping::BGEU:
+			case Mapping::JAL:
+			case Mapping::JALR:
+					children.push_back(new InstructionNodeBranch(p.op, subtree_hash,-4));
+				break;
+
+			default:
+				//printf("create RNode for instruction: %s\n", mappingStr[op]);
+					children.push_back(new InstructionNodeR(p.op, subtree_hash));
+				break;
+			}
+		
+		found_child = children.back();
+	}
+#endif
 	// else{
 	// 
 	// }
@@ -899,6 +995,7 @@ std::vector<Path> InstructionNodeR::force_path_extension(const Path p, std::func
 }
 
 int InstructionNodeR::prune_tree(uint64_t weight_threshold, uint8_t depth){
+	#ifndef single_trace_mode
 	uint8_t child_idx = 0;
 	bool pruned = false;
 	for (InstructionNode*& child : children) {//iterate over the actual pointers
@@ -950,6 +1047,9 @@ int InstructionNodeR::prune_tree(uint64_t weight_threshold, uint8_t depth){
 		child->prune_tree(weight_threshold, depth+1);
 		child_idx++;
 	}
+	#else
+		printf("[ERROR] pruning not supported for single trace mode");
+	#endif
 	return 0;
 }
 

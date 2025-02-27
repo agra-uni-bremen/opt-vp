@@ -6,7 +6,7 @@
 
 #include "lib/json/single_include/nlohmann/json.hpp"
 
-#define INSTRUCTION_TREE_DEPTH 50
+#define INSTRUCTION_TREE_DEPTH 10
 #define MAX_VARIANTS 3
 #define SF_BATCH_SIZE 3
 #define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
@@ -21,10 +21,12 @@
 
 #define trace_pcs
 #define log_pcs
-// #define debug_register_dependencies
+//#define debug_register_dependencies
 //#define debug_dependencies
 // #define handle_self_modifying_code
 //#define trace_individual_registers
+
+//#define single_trace_mode
 
 //#define dot_pc_on_pruned_nodes
 
@@ -779,14 +781,25 @@ class InstructionNodeR : virtual public InstructionNode{
 		//static const NODE_TYPE node_type = NODE_TYPE::NODE;
 		InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash);
 
-		std::list<InstructionNode*> children;
+		#ifdef single_trace_mode
+		std::list<InstructionNodeR*> children;
+		#else
+		std::list<InstructionNode*> children; //can contain e.g. leaf nodes
+		#endif
 
+		#ifdef single_trace_mode
+		InstructionNodeR* get_last();
+		#endif
 		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
 						uint32_t next_rb_index);
 		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
 						uint32_t next_rb_index, uint32_t offset);
 
+		#ifdef single_trace_mode
+		InstructionNodeR* insert(const StepInsertInfo& p);
+		#else
 		InstructionNode* insert(const StepInsertInfo& p) override;
+		#endif
 
 		void _print(uint8_t level) override;
 
