@@ -23,6 +23,8 @@
 #define log_pcs
 // #define debug_register_dependencies
 //#define debug_dependencies
+// #define handle_self_modifying_code
+//#define trace_individual_registers
 
 //#define dot_pc_on_pruned_nodes
 
@@ -255,6 +257,16 @@ struct BranchingPoint
 	InstructionNode* starting_point;
 };
 
+struct RegisterSet
+{
+	int8_t rs1 = -1;
+	int8_t rs2 = -1;
+	int8_t rd = -1;
+
+	RegisterSet(int8_t rs1, int8_t rs2, int8_t rd)
+        : rs1(rs1), rs2(rs2), rd(rd) {}
+};
+
 uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash);
 
 class InstructionNode{
@@ -291,6 +303,10 @@ class InstructionNode{
 
 		std::bitset<32> inputs_;
 		std::bitset<32> outputs_;
+
+		#ifdef trace_individual_registers
+		std::map<uint64_t, RegisterSet> register_sets;
+		#endif
 
 		uint64_t subtree_hash = 0;
 
@@ -464,6 +480,16 @@ class InstructionNode{
 			jsonNode["weight"] = weight;
 			jsonNode["subtree_hash"] = subtree_hash;
 
+			#ifdef trace_individual_registers
+			nlohmann::json jsonRegisterSets = nlohmann::json::object();
+			for (const auto& entry : register_sets) {
+				uint64_t key = entry.first;
+				const RegisterSet& rs = entry.second;
+				jsonRegisterSets[std::to_string(key)] = { rs.rs1, rs.rs2, rs.rd };
+			}
+
+			jsonNode["register_sets"] = jsonRegisterSets;
+			#endif 
 			//convert dependencies
 			std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
 			std::set<int8_t> anti_dependencies;
@@ -614,6 +640,21 @@ class InstructionNode{
 			weight++; 
 			total_cycles += p.cycles;
 			//sum_step_ids += p.step; //TODO add curent step
+			#ifdef trace_individual_registers
+			if(!register_sets.count(p.pc)){
+				register_sets.emplace(p.pc, RegisterSet{p.input1, p.input2, p.output});
+			}
+			#endif
+			#ifdef handle_self_modifying_code
+			else{
+				auto it = register_sets.find(p.pc);
+				RegisterSet rset = it->second;
+				if(rset.rs1 != p.input1 || rset.rs2 != p.input2 || rset.rd != p.output){
+					printf("detected binary modification (%x -> %x)\n"), p.pc, 1-p.pc;
+					register_sets.emplace(1-p.pc, RegisterSet{p.input1, p.input2, p.output});
+				}
+			}
+			#endif
 			if(p.step > O_MID){
 				occurrence[3]++;
 			}else if(p.step > O_BEGINNING){
