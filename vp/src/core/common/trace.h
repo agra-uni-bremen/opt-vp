@@ -26,7 +26,7 @@
 // #define handle_self_modifying_code
 //#define trace_individual_registers
 
-//#define single_trace_mode
+#define single_trace_mode
 
 //#define dot_pc_on_pruned_nodes
 
@@ -297,10 +297,13 @@ class InstructionNode{
 		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash)
 				: instruction(instruction), weight(0){
 					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
-					// for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
-					// {
-					// 	dependencies_true_[i] = false;
-					// }
+					for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
+					{
+						dependencies_true_[i] = false;
+						
+					}
+					dependencies_anti_.reset();
+					dependencies_output_.reset();
 					
 		}
 
@@ -328,6 +331,8 @@ class InstructionNode{
 		#endif
 
 		uint64_t subtree_hash = 0;
+
+		std::map<uint64_t, int> pc_map;
 
 		//additional metrics
 
@@ -498,6 +503,7 @@ class InstructionNode{
 			jsonNode["type"] = get_node_type();
 			jsonNode["weight"] = weight;
 			jsonNode["subtree_hash"] = subtree_hash;
+			jsonNode["PCs"] = pc_map;
 
 			#ifdef trace_individual_registers
 			nlohmann::json jsonRegisterSets = nlohmann::json::object();
@@ -657,6 +663,7 @@ class InstructionNode{
 		//dependencies should be 0 if not applicable
 		virtual void update_weight(const StepUpdateInfo& p){
 			weight++; 
+			pc_map[p.pc]++;
 			total_cycles += p.cycles;
 			//sum_step_ids += p.step; //TODO add curent step
 			#ifdef trace_individual_registers
@@ -830,7 +837,7 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 	public:
 		InstructionNodeLeaf(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t pc);
 
-	std::map<uint64_t, int> pc_map;
+	//std::map<uint64_t, int> pc_map;
 
 	InstructionNode* insert(const StepInsertInfo& p) override;
 

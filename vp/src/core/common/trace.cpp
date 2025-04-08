@@ -3,6 +3,8 @@
 #include <bitset>
 #include "lib/json/single_include/nlohmann/json.hpp"
 
+bool is_first_insert = true;
+
 using namespace Opcode;
 
 	int8_t register_dependencies_true[32] = {-1,-1,-1,-1,-1,-1,-1,-1,
@@ -436,7 +438,7 @@ void InstructionNodeR::insert_rb(
 	// if(i==INSTRUCTION_TREE_DEPTH-2){
 	// 	printf("End of tree check: %s - %s", Opcode::mappingStr[current_node->instruction], Opcode::mappingStr[current_step->last_executed_instruction]);
 	// }
-	if(i==INSTRUCTION_TREE_DEPTH-1){//only insert the last node (as all other nodes are already in the tree)
+	if((i==INSTRUCTION_TREE_DEPTH-1) || (is_first_insert && i>0)){//only insert the last node (as all other nodes are already in the tree)
 		last_node = last_node->insert({				
 								current_step->last_executed_instruction, 
 								current_step->last_executed_pc,
@@ -451,7 +453,7 @@ void InstructionNodeR::insert_rb(
 	}
 	#endif
 	}
-
+	is_first_insert = false;
 	
 }
 #ifndef single_trace_mode
@@ -1195,7 +1197,7 @@ void InstructionNodeLeaf::update_weight(const StepUpdateInfo& p){
 
 nlohmann::ordered_json InstructionNodeLeaf::to_json(){
 	nlohmann::ordered_json additional_fields;
-	additional_fields["PCs"] = pc_map;
+	//additional_fields["PCs"] = pc_map;
 
 	nlohmann::json base_class_json = InstructionNode::to_json();
 	base_class_json.update(additional_fields);
