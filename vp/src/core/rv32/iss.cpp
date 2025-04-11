@@ -1277,7 +1277,10 @@ void ISS::exec_step() {
 		last_executed_steps[ring_buffer_index].last_memory_read = 0;
 		last_executed_steps[ring_buffer_index].last_memory_written = 0;
 		last_executed_steps[ring_buffer_index].last_step_id = total_num_instr;
+		last_executed_steps[ring_buffer_index].last_stack_pointer = regs[RegFile::sp];
+		last_executed_steps[ring_buffer_index].last_frame_pointer = regs[RegFile::fp];
 
+		last_executed_steps[ring_buffer_index].last_memory_access_type = std::get<1>(last_memory_access);
 		if(std::get<1>(last_memory_access)==AccessType::STORE){//check if memory was accessed in the last execution step
 			last_executed_steps[ring_buffer_index].last_memory_written = std::get<0>(last_memory_access); //fetch accessed addresses from persistent variable
 			if(last_executed_steps[ring_buffer_index].last_memory_written==0){

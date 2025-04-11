@@ -56,6 +56,12 @@ enum class NODE_TYPE {
 	MEMORY_L = LEAF | MEMORY, 
 };
 
+enum class AccessType {
+	NONE=0,
+	LOAD=1,
+	STORE=2
+};
+
 InstructionType getInstructionType(Opcode::Mapping mapping);
 
 struct ExecutionInfo {
@@ -68,6 +74,9 @@ struct ExecutionInfo {
 
 	uint64_t last_memory_read;
 	uint64_t last_memory_written;
+	AccessType last_memory_access_type;
+	uint64_t last_stack_pointer;
+	uint64_t last_frame_pointer;
 
 	uint64_t last_step_id;
 };
@@ -85,6 +94,10 @@ struct StepInsertInfo {
     uint32_t depth;
     uint64_t step;
 	uint64_t cycles;
+	uint64_t memory_address;
+	AccessType access_type;
+	uint64_t stack_pointer;
+	uint64_t frame_pointer;
 };
 
 struct ScoreParams {
@@ -114,6 +127,10 @@ struct StepUpdateInfo {
     uint64_t pc;
     uint64_t step;
 	uint64_t cycles;
+	uint64_t memory_address;
+	AccessType access_type;
+	uint64_t stack_pointer;
+	uint64_t frame_pointer;
 };
 
 class InstructionNode;
@@ -239,7 +256,7 @@ struct CsvParams {
 };
 
 struct PathExtensionParams {
-    int32_t length;
+    uint32_t length;
     float score_bonus;
     float score_multiplier;
     int32_t tree_id;
@@ -822,8 +839,8 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 class MemoryNode{
 	public: 
 		bool is_store = false;
-		Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;//Stack(current frame=1 else 2) or Heap (4) or both (3,5,6,7)
-		std::map<uint64_t, uint64_t> memory_accesses;
+		//Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;//Stack(current frame=1 else 2) or Heap (4) or both (3,5,6,7)
+		std::map<uint64_t, std::set<std::pair<uint64_t, Opcode::MemoryRegion>>> memory_accesses;
 		uint64_t last_access = 0;
 		uint64_t access_offset_sum = 0;
 
@@ -833,13 +850,12 @@ class MemoryNode{
 		nlohmann::ordered_json memory_to_json(){
 			nlohmann::ordered_json json; 
 			json["LS"] = is_store;
-			json["MemoryLocation"] = memory_location; //TODO make this a list?
 			json["Accesses"] = memory_accesses;
 			json["OffsetSum"] = access_offset_sum;
 			return json;
 		};
 
-		void register_access(uint64_t address, uint64_t prev_writer, uint64_t prev_reader, 
+		void register_access(uint64_t pc, uint64_t address, AccessType access_type,uint64_t prev_access, 
 								uint64_t stackpointer, uint64_t framepointer);
 
 };
@@ -860,7 +876,7 @@ class BranchNode{
 			return json;
 		};
 
-		void register_access(uint64_t address, uint64_t prev_writer, uint64_t prev_reader, 
+		void register_access(uint64_t pc, uint64_t address, AccessType access_type,uint64_t prev_access, 
 								uint64_t stackpointer, uint64_t framepointer);
 
 };
@@ -871,6 +887,8 @@ class InstructionNodeMemory : public InstructionNodeR, virtual public MemoryNode
 								uint64_t memory_access, bool is_store_instruction);
 
 		void _print(uint8_t level) override;
+
+		void update_weight(const StepUpdateInfo& p) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
@@ -894,6 +912,8 @@ class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public Mem
 
 
 		void _print(uint8_t level) override;
+
+		void update_weight(const StepUpdateInfo& p) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 

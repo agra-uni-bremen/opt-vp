@@ -169,12 +169,6 @@ struct PendingInterrupts {
 	uint32_t pending;
 };
 
-enum class AccessType {
-	NONE=0,
-	LOAD=1,
-	STORE=2
-};
-
 struct ISS : public external_interrupt_target, public clint_interrupt_target, public iss_syscall_if, public debug_target_if {
 	clint_if *clint = nullptr;
 	instr_memory_if *instr_mem = nullptr;
