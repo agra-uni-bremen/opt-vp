@@ -177,7 +177,7 @@ void InstructionNodeR::insert_rb(
 				tmp_true_dependency2 = i - register_dependencies_true[rs2];
 			}
 		}else{
-			tmp_input1 = rs2;
+			tmp_input2 = rs2;
 		}
 		//int8_t true_dependency3 = -1; //TODO support R4 Fused Multiply Instructions
 
@@ -218,6 +218,8 @@ void InstructionNodeR::insert_rb(
 		case Type::I :
 			/* rs1, rd */
 			tmp_true_dependency2 = -1; //reset as rs2 is not used (unknown value in variable)
+			rs2 = -1;
+			tmp_input2 = -1;
 			register_dependencies_true[rd] = i;
 			register_dependencies_output[rd].set(i, true);
 			tmp_output = rd;
@@ -327,6 +329,10 @@ void InstructionNodeR::insert_rb(
 			/* rd */
 			tmp_true_dependency1 = -1;
 			tmp_true_dependency2 = -1;
+			rs1 = -1;
+			rs2 = -1;
+			tmp_input1 = -1;
+			tmp_input2 = -1;
 			register_dependencies_true[rd] = i;
 			register_dependencies_output[rd].set(i, true);
 			tmp_output = rd;
@@ -340,6 +346,10 @@ void InstructionNodeR::insert_rb(
 			/* rd */
 			tmp_true_dependency1 = -1;
 			tmp_true_dependency2 = -1;
+			rs1 = -1;
+			rs2 = -1;
+			tmp_input1 = -1;
+			tmp_input2 = -1;
 			register_dependencies_true[rd] = i;
 			register_dependencies_output[rd].set(i, true);
 			tmp_output = rd;
@@ -411,6 +421,7 @@ void InstructionNodeR::insert_rb(
 									tmp_true_dependency1, tmp_true_dependency2,
 									output_dependencies,
 									anti_dependencies,
+									rs1, rs2, rd, 
 									tmp_input1, tmp_input2, tmp_output, 
 									i, 
 									current_step->last_step_id, 
@@ -423,6 +434,7 @@ void InstructionNodeR::insert_rb(
 			// inserted_nodes[i] = current_node;
 		}else{
 			update_weight({-1, -1, 0, 0, //the root node does not have any dependencies
+			rs1,rs2,rd,
 			tmp_input1, tmp_input2, tmp_output,
 			0, //depth is 0 as this is the root node
 			current_step->last_step_id, 
@@ -445,10 +457,15 @@ void InstructionNodeR::insert_rb(
 								tmp_true_dependency1, tmp_true_dependency2,
 								output_dependencies,
 								anti_dependencies,
+								rs1, rs2, rd, 
 								tmp_input1, tmp_input2, tmp_output, 
 								i, 
 								current_step->last_step_id, 
-								current_step->last_cycles
+								current_step->last_cycles, 
+								last_memory_access,
+								access_type,
+								current_step->last_stack_pointer,
+								current_step->last_frame_pointer
 								});
 	}
 	#endif
@@ -578,6 +595,9 @@ InstructionNodeR* InstructionNodeR::insert(const StepInsertInfo& p){
 								p.true_dependency2,
 								p.output_dependencies,
 								p.anti_dependencies,
+								p.rs1,
+								p.rs2,
+								p.rd,
 								p.input1,
 								p.input2,
 								p.output,
