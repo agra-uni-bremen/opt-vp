@@ -24,7 +24,7 @@
 // #define debug_register_dependencies
 //#define debug_dependencies
 // #define handle_self_modifying_code
-//#define trace_individual_registers
+#define trace_individual_registers
 
 //#define dot_pc_on_pruned_nodes
 
@@ -88,8 +88,12 @@ struct StepInsertInfo {
     int8_t true_dependency2;
     std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
     std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
-    int8_t input1;
-    int8_t input2;
+	uint8_t rs1;
+	uint8_t rs2;
+	uint8_t rd;
+	//int8_t rs3; //add for fused multiply instructions
+    int8_t input1; //equal to rs1 if rs1 was not written to by another instruction in the sequence, -1 otherwise
+    int8_t input2; 
     int8_t output;
     uint32_t depth;
     uint64_t step;
@@ -121,6 +125,9 @@ struct StepUpdateInfo {
     int8_t dependency2;
     std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
     std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
+	uint8_t rs1;
+	uint8_t rs2;
+	uint8_t rd;
     int8_t input1;
     int8_t input2;
 	int8_t output;
@@ -659,7 +666,7 @@ class InstructionNode{
 			//sum_step_ids += p.step; //TODO add curent step
 			#ifdef trace_individual_registers
 			if(!register_sets.count(p.pc)){
-				register_sets.emplace(p.pc, RegisterSet{p.input1, p.input2, p.output});
+				register_sets.emplace(p.pc, RegisterSet{p.rs1, p.rs2, p.rd});
 			}
 			#endif
 			#ifdef handle_self_modifying_code
