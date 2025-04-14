@@ -24,7 +24,7 @@
 //#define debug_register_dependencies
 //#define debug_dependencies
 // #define handle_self_modifying_code
-//#define trace_individual_registers
+#define trace_individual_registers
 
 #define single_trace_mode
 
