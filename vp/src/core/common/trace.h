@@ -7,6 +7,7 @@
 #include "lib/json/single_include/nlohmann/json.hpp"
 
 #define INSTRUCTION_TREE_DEPTH 10
+#define JSON_INDENT -1
 #define MAX_VARIANTS 3
 #define SF_BATCH_SIZE 3
 #define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
