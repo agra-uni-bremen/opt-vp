@@ -229,11 +229,15 @@ void ISS::exec_step() {
 			instruction_trees.emplace_back(oldest_op, 0);
 		}
 		found_tree = &instruction_trees.back();
+		#ifndef trace_global_dependencies
 		found_tree->insert_rb(last_executed_steps, 
 			ring_buffer_index);
+		#else
+		found_tree->insert_step(last_executed_steps[ring_buffer_index]);
+		#endif
 		}
-	#endif
-
+        #endif
+		
 	if (trace) {
 		printf("core %2u: prv %1x: pc %8x: %s ", csrs.mhartid.reg, prv, last_pc, Opcode::mappingStr[op]);
 		switch (Opcode::getType(op)) {

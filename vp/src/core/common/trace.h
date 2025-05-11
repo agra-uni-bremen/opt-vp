@@ -28,6 +28,7 @@
 #define trace_individual_registers
 
 #define single_trace_mode
+#define trace_global_dependencies
 
 //#define dot_pc_on_pruned_nodes
 
@@ -84,6 +85,7 @@ struct ExecutionInfo {
 	uint64_t last_step_id;
 };
 
+#ifndef trace_global_dependencies
 struct StepInsertInfo {
     Opcode::Mapping op;
     uint64_t pc;
@@ -106,7 +108,30 @@ struct StepInsertInfo {
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
 };
-
+#else
+struct StepInsertInfo {
+    Opcode::Mapping op;
+    uint64_t pc;
+    int64_t true_dependency1;
+    int64_t true_dependency2;
+    int64_t output_dependency;
+   	int64_t anti_dependency;
+	uint8_t rs1;
+	uint8_t rs2;
+	uint8_t rd;
+	//int8_t rs3; //add for fused multiply instructions
+    // int8_t input1; //equal to rs1 if rs1 was not written to by another instruction in the sequence, -1 otherwise
+    // int8_t input2; 
+    // int8_t output;
+    // uint32_t depth;
+    uint64_t step;
+	uint64_t cycles;
+	uint64_t memory_address;
+	AccessType access_type;
+	uint64_t stack_pointer;
+	uint64_t frame_pointer;
+};
+#endif
 struct ScoreParams {
 	Opcode::Mapping instr; 
 	Opcode::Mapping tree; 
@@ -123,6 +148,7 @@ struct ScoreParams {
 
 using ScoreFunction = std::function<float(ScoreParams)>;
 
+#ifndef trace_global_dependencies
 struct StepUpdateInfo {
     int8_t dependency1;
     int8_t dependency2;
@@ -142,6 +168,27 @@ struct StepUpdateInfo {
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
 };
+#else
+struct StepUpdateInfo {
+    int64_t dependency1; //true dependency
+    int64_t dependency2; //true dependency
+    int64_t output_dependency;
+   	int64_t anti_dependency;
+	uint8_t rs1;
+	uint8_t rs2;
+	uint8_t rd;
+    // int8_t input1;
+    // int8_t input2;
+	// int8_t output;
+    uint64_t pc;
+    uint64_t step;
+	uint64_t cycles;
+	uint64_t memory_address;
+	AccessType access_type;
+	uint64_t stack_pointer;
+	uint64_t frame_pointer;
+};
+#endif
 
 class InstructionNode;
 
@@ -305,6 +352,7 @@ class InstructionNode{
 		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash)
 				: instruction(instruction), weight(0){
 					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
+					#ifndef trace_global_dependencies
 					for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
 					{
 						dependencies_true_[i] = false;
@@ -312,6 +360,7 @@ class InstructionNode{
 					}
 					dependencies_anti_.reset();
 					dependencies_output_.reset();
+					#endif
 					
 		}
 
@@ -326,10 +375,17 @@ class InstructionNode{
 		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
 		//array of negative offsets to last node that writes to rs1 or rs2 (1=this node depends on tree[current-index])
 		//very likely this only marks 2 values for longer (unique) paths
+		#ifndef trace_global_dependencies
 		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_; //value at offset 0 is ignored
 		//index of other nodes this node has a anti/output dependency to
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_output_;
+		#else
+		std::array<int64_t, 2> dependencies_true_;
+
+		int64_t dependencies_anti_;
+		int64_t dependencies_output_;
+		#endif
 
 		std::bitset<32> inputs_;
 		std::bitset<32> outputs_;
@@ -346,6 +402,7 @@ class InstructionNode{
 
 
 		virtual InstructionNode* insert(const StepInsertInfo& p) = 0;
+		//virtual InstructionNode* insert_single_step(const StepInsertInfo& p) = 0;
 
 		virtual float get_score_bonus(){
 			using namespace Opcode;
@@ -418,8 +475,8 @@ class InstructionNode{
 			return 1.0;
 		}
 
-
 		virtual double get_inv_dep_score(){
+			#ifndef trace_global_dependencies
 			using namespace Opcode;
 			double result = 0.0;
 			switch (instruction)
@@ -452,6 +509,7 @@ class InstructionNode{
 				return result;
 				break;
 			}
+			#endif
 		}
 
 		uint32_t count_true_dependencies(){
@@ -524,6 +582,7 @@ class InstructionNode{
 			jsonNode["register_sets"] = jsonRegisterSets;
 			#endif 
 			//convert dependencies
+			#ifndef trace_global_dependencies
 			std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
 			std::set<int8_t> anti_dependencies;
 			std::set<int8_t> output_dependencies;
@@ -539,28 +598,45 @@ class InstructionNode{
 						output_dependencies.insert(i);
 					}
 			}
+			
+						std::set<int8_t> inputs;
+						std::set<int8_t> outputs;
+			
+						for (size_t i = 0; i < 32; i++){
+								if(inputs_[i]){
+									inputs.insert(i);
+								}
+								if (outputs_[i]) {
+									outputs.insert(i);
+								}
+						}
+						nlohmann::json jsonDependencies1 = true_dependencies;
+						jsonNode["dependencies_true"] = jsonDependencies1;
+						nlohmann::json jsonDependencies2 = anti_dependencies;
+						jsonNode["dependencies_anti"] = jsonDependencies2;
+						nlohmann::json jsonDependencies3 = output_dependencies;
+						jsonNode["dependencies_output"] = jsonDependencies3;
+			
+						jsonNode["inputs"] = inputs;
+						jsonNode["outputs"] = outputs;
+			#else
+			//std::array<int64_t,2> true_dependencies; //step index of previous node this node has a true dependency to
+			//int64_t anti_dependencies;
+			//int64_t output_dependencies;
 
-			std::set<int8_t> inputs;
-			std::set<int8_t> outputs;
-
-			for (size_t i = 0; i < 32; i++){
-					if(inputs_[i]){
-						inputs.insert(i);
-					}
-					if (outputs_[i]) {
-						outputs.insert(i);
-					}
-			}
-
-			nlohmann::json jsonDependencies1 = true_dependencies;
+			nlohmann::json jsonDependencies1 = dependencies_true_;
 			jsonNode["dependencies_true"] = jsonDependencies1;
-			nlohmann::json jsonDependencies2 = anti_dependencies;
+			nlohmann::json jsonDependencies2 = dependencies_anti_;
 			jsonNode["dependencies_anti"] = jsonDependencies2;
-			nlohmann::json jsonDependencies3 = output_dependencies;
+			nlohmann::json jsonDependencies3 = dependencies_output_;
 			jsonNode["dependencies_output"] = jsonDependencies3;
-
+			#ifndef trace_global_dependencies
 			jsonNode["inputs"] = inputs;
 			jsonNode["outputs"] = outputs;
+			#endif
+
+			#endif
+
 
 			jsonNode["occurrence"] = occurrence;
 
@@ -616,39 +692,42 @@ class InstructionNode{
 		virtual void to_csv(const CsvParams& p){
 			std::stringstream csv_stream; 
 			std::map<InstructionType, uint32_t> _instruction_types = 
-											p.instruction_types;
-
+			p.instruction_types;
+			
+			#ifndef trace_global_dependencies
+			
 			double current_dep_score = get_inv_dep_score();
 			double current_total_dep_score = p.last_dep_score + current_dep_score;
 
 			uint32_t current_true_dep = count_true_dependencies();
 			uint32_t current_anti_dep = dependencies_anti_.count();
 			uint32_t current_out_dep = dependencies_output_.count();
-
+			
 			uint32_t total_true_dep = p.true_dep +  current_true_dep;
 			uint32_t total_anti_dep = p.anti_dep + current_anti_dep;
 			uint32_t total_out_dep = p.out_dep + current_out_dep;
-
+			
 			std::bitset<32> current_total_inputs = p.total_inputs | inputs_;
 			std::bitset<32> current_total_outputs = p.total_outputs | outputs_;
 
 			uint64_t number_of_pcs = get_pc().size();
 			_instruction_types[getInstructionType(instruction)]++;
-
+			
 			const char* instruction_string = "UNKWN ";
 			if(instruction < Opcode::mappingStr.size()){
 				instruction_string = Opcode::mappingStr[instruction];
 			}
-				csv_stream = csv_format(p.parent_hash, p.tree, instruction_string, p.last_weight ,p.max_weight, p.total_max_weight, 
-								p.depth, current_dep_score, current_total_dep_score, 
-								current_true_dep, current_anti_dep, current_out_dep, 
-								total_true_dep, total_anti_dep,total_out_dep, 
-								0, current_total_inputs.count(), 
-								current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
-								number_of_pcs, p.max_pcs);
-
-			std::cout << csv_stream.str() << std::endl;
-		}
+			csv_stream = csv_format(p.parent_hash, p.tree, instruction_string, p.last_weight ,p.max_weight, p.total_max_weight, 
+				p.depth, current_dep_score, current_total_dep_score, 
+				current_true_dep, current_anti_dep, current_out_dep, 
+				total_true_dep, total_anti_dep,total_out_dep, 
+				0, current_total_inputs.count(), 
+				current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
+				number_of_pcs, p.max_pcs);
+				
+				std::cout << csv_stream.str() << std::endl;
+				#endif
+			}
 
 		virtual std::map<uint64_t, int> get_pc() = 0;
 
@@ -700,12 +779,17 @@ class InstructionNode{
 			}
 			if(p.dependency1>0){
 				dependencies_true_[p.dependency1] = true;
-			}else if(p.input1>=0){
+			}
+			#ifndef trace_global_dependencies
+			else if(p.input1>=0){
 				inputs_.set(p.input1, true);
 			}
+			#endif
 			if(p.dependency2>0){
 				dependencies_true_[p.dependency2] = true;
-			}else if(p.input2>=0){
+			}
+			#ifndef trace_global_dependencies
+			else if(p.input2>=0){
 				inputs_.set(p.input2, true);
 			}
 			if(p.output > 0){//ignore outputs for zero reg
@@ -713,6 +797,10 @@ class InstructionNode{
 			}
 			dependencies_anti_ |= p.anti_dependencies;
     		dependencies_output_ |= p.output_dependencies;
+			#else
+			dependencies_anti_ = p.anti_dependency;
+			dependencies_output_ = p.output_dependency;
+			#endif
 		}
 
 		//called recursively for children and extends path if new score > old score
@@ -722,6 +810,7 @@ class InstructionNode{
 		//non R Nodes ignore force_extension as they don't have any children
 		virtual Path extend_path(const PathExtensionParams& p){
 			Path max_path;
+			#ifndef trace_global_dependencies
 			max_path.length = p.length;
 			max_path.minimum_weight = weight;
 
@@ -744,7 +833,9 @@ class InstructionNode{
 
 			max_path.end_of_sequence = this;
 
+			#endif
 			return max_path;
+
 
 		}
 
@@ -759,6 +850,7 @@ class InstructionNode{
 
 			std::set<int8_t> indices_anti;
 			std::set<int8_t> indices_out;
+			#ifndef trace_global_dependencies
 			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
 				if (dependencies_anti_[i]) {
 					indices_anti.insert(i);
@@ -772,6 +864,7 @@ class InstructionNode{
 									get_pc(), 
 									dependencies_true_, indices_out, indices_anti);
 			nodes.push_back(n);
+			#endif
 			return nodes;
 		} 
 
@@ -805,6 +898,7 @@ class InstructionNodeR : virtual public InstructionNode{
 		#ifdef single_trace_mode
 		InstructionNodeR* get_last();
 		#endif
+		void insert_step(ExecutionInfo last_executed_step);
 		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
 						uint32_t next_rb_index);
 		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
@@ -812,6 +906,7 @@ class InstructionNodeR : virtual public InstructionNode{
 
 		#ifdef single_trace_mode
 		InstructionNodeR* insert(const StepInsertInfo& p);
+		InstructionNodeR* insert_single_step(const StepInsertInfo& p);
 		#else
 		InstructionNode* insert(const StepInsertInfo& p) override;
 		#endif
