@@ -3,6 +3,7 @@
 #include "instr.h"
 #include <set>
 #include <bitset>
+#include <fstream>
 
 #include "lib/json/single_include/nlohmann/json.hpp"
 
@@ -213,6 +214,24 @@ struct Path
 		// }
 		// std::cout << "\n\n";
 	}
+
+	//appends the sequence as a csv list to file specified in output_filename
+	// opcode -> opcode -> opcode ... ; length ; weight; score; hash
+	void to_csv_stats(std::ostream& output_file){
+    for (auto &&opcode : opcodes)
+    {
+        const char* opcode_string = "UNKWN ";
+		output_file << "\"";
+        if(opcode < Opcode::mappingStr.size()){
+            opcode_string = Opcode::mappingStr[opcode];
+        }
+        output_file << opcode_string << " -> ";
+    }
+	output_file << "\"";
+    output_file << ";" << length << ";" << minimum_weight 
+        << ";" << get_score([](const ScoreParams p) { return p.length * p.weight; }) 
+        << ";" << path_hashes.back() << "\n";
+}
 };
 
 

@@ -2475,6 +2475,26 @@ void ISS::show() {
 	std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists;
 	std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists;
 
+	std::string file_path = std::string(input_filename);
+	std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
+	std::string csv_stats = "";
+	csv_stats = output_filename + 
+								std::string("Stats10_") + 
+								application_name + 
+								std::string(".csv");
+
+	// Write CSV header once, before the loop
+	{
+		std::ofstream csv_out(csv_stats, std::ios::app);
+		csv_out.seekp(0, std::ios::end);
+		if (csv_out.tellp() == 0) {
+			csv_out << "Opcodes;Length;Weight;Score;Hash\n";
+		}else{
+			csv_out.seekp(0, std::ios::end); // Move to the end of the file
+			csv_out << "\n"; // Add a newline to separate from previous content
+		}
+	}
+
 	printf("\n -----------------\n| Best Sequences |\n -----------------\n");
 	for (auto &&p : discovered_sequences)
 	{
@@ -2525,6 +2545,14 @@ void ISS::show() {
 		printf("-------------------------------------------\n");
 		//print discovered sequences
 		p.show();	
+		// printf("Stats:\n");
+		// p.to_csv_stats();
+		//print stats of sequence to file as csv
+
+		{
+			std::ofstream csv_out(csv_stats, std::ios::app);
+			p.to_csv_stats(csv_out);
+		}
 
 		tmp_discovered_sub_sequences = p.end_of_sequence->force_path_extension(p, sf);
 		
