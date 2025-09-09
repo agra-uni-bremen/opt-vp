@@ -402,14 +402,14 @@ void InstructionNodeR::insert_rb(
 			update_weight({-1, -1, 0, 0, //the root node does not have any dependencies
 			rs1,rs2,rd,
 			tmp_input1, tmp_input2, tmp_output,
-			0, //depth is 0 as this is the root node
+			current_step->last_executed_pc,
 			current_step->last_step_id, 
 			current_step->last_cycles, 
 			last_memory_access,
 			access_type,
 			current_step->last_stack_pointer,
 			current_step->last_frame_pointer
-			});
+			}, 0); //depth is 0 as this is the root node
 		}
 	}
 
@@ -505,7 +505,7 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 								p.access_type,
 								p.stack_pointer,
 								p.frame_pointer
-							});
+							}, p.depth);
 
 	return found_child;
 }
@@ -1103,8 +1103,8 @@ std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const ch
 		return name;
 }
 
-void InstructionNodeLeaf::update_weight(const StepUpdateInfo& p){
-		InstructionNode::update_weight(p);
+void InstructionNodeLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
+		InstructionNode::update_weight(p, depth);
 		pc_map[p.pc]++; //if key does not exist, it is created with value 0 
 	}
 
@@ -1279,8 +1279,8 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 	return name;
 }
 
-void InstructionNodeMemory::update_weight(const StepUpdateInfo& p){
-	InstructionNode::update_weight(p);
+void InstructionNodeMemory::update_weight(const StepUpdateInfo& p, uint32_t depth){
+	InstructionNode::update_weight(p, depth);
 	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer);
 }
 
@@ -1295,8 +1295,8 @@ void InstructionNodeMemoryLeaf::_print(uint8_t level){
 	printf("Not implemented");
 }
 
-void InstructionNodeMemoryLeaf::update_weight(const StepUpdateInfo& p){
-	InstructionNode::update_weight(p);
+void InstructionNodeMemoryLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
+	InstructionNode::update_weight(p, depth);
 	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer);
 	pc_map[p.pc]++;
 }

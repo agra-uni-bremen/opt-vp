@@ -7,7 +7,7 @@
 
 #include "lib/json/single_include/nlohmann/json.hpp"
 
-#define INSTRUCTION_TREE_DEPTH 10
+#define INSTRUCTION_TREE_DEPTH 20
 #define JSON_INDENT 1
 #define MAX_VARIANTS 3
 #define SF_BATCH_SIZE 3
@@ -23,6 +23,7 @@
 
 #define trace_pcs
 #define log_pcs
+#define output_stats
 // #define debug_register_dependencies
 //#define debug_dependencies
 // #define handle_self_modifying_code
@@ -148,7 +149,7 @@ struct Path
 {
 	uint32_t length = 0;
 	uint64_t minimum_weight = 0;
-	float score_bonus = 0;
+	float score_bonus = 0.0;
 	float score_multiplier = 1.0;
 
 	double inverse_dependency_score = 0.0;
@@ -165,7 +166,12 @@ struct Path
 		ScoreParams params = {opcodes.back(), opcodes[0], 
 		minimum_weight, length, inverse_dependency_score, 
 		num_children, inputs, outputs, score_multiplier, score_bonus};
-		return score_function(params);
+		float score_result = score_function(params);
+		if(score_result < 0){
+			printf("[ERROR] Score function returned negative score: %f\nweight: %ld\nlength: %ld\n", score_result, minimum_weight, length);
+			score_result = INFINITY;
+		}
+		return score_result;
 		// length * minimum_weight * score_multiplier 
 		// 		+ minimum_weight * score_bonus; //length * minimum_weight;
 	}
@@ -243,9 +249,9 @@ struct PathNode {
 
 	//uint64_t cycles;
     //uint64_t subtree_hash;
-	float score_bonus;
-	float score_multiplier;
-	float inverse_dependency_score;
+	float score_bonus = 0.0;
+	float score_multiplier = 1.0;
+	float inverse_dependency_score = 0.0;
 
 	//usually only for leaf nodes, but we can calculate this from following all branches from the current node
 	std::map<uint64_t, int> program_counters;
@@ -310,6 +316,12 @@ struct RegisterSet
 	RegisterSet(int8_t rs1, int8_t rs2, int8_t rd)
         : rs1(rs1), rs2(rs2), rd(rd) {}
 };
+struct RegisterSetCounter {
+	int count;
+	RegisterSet regset;
+	RegisterSetCounter(int8_t rs1, int8_t rs2, int8_t rd)
+		: count(1), regset(rs1, rs2, rd) {}
+};
 
 uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash);
 
@@ -332,6 +344,17 @@ class InstructionNode{
 		Opcode::Mapping instruction;
 		//the number of times this node occurred
 		uint64_t weight;
+		//weight counting only unique paths that contain this node
+		//exclude paths that already contain this node with another prefix (e.g. ADD -> SUB -> ADD -> SUB)
+		//used to calculate the coverage of a sequence (length * true_weight) 
+		//using the normal weight can lead to overestimation of coverage (sequence > 100% coverage)
+		uint64_t true_weight = 0;
+
+		//last step id this node occurred in
+		//used to lock true_weight  to prevent counting the same path multiple times
+		//update last_occurrence when true_weight is updated 
+		//true weight is updated if current step id > last_occurrence + depth
+		uint64_t last_occurrence = 0;
 
 		uint64_t total_cycles = 0;
 		//sum of the step ids this node occurred in
@@ -348,8 +371,9 @@ class InstructionNode{
 		std::bitset<32> inputs_;
 		std::bitset<32> outputs_;
 
+
 		#ifdef trace_individual_registers
-		std::map<uint64_t, RegisterSet> register_sets;
+		std::map<uint64_t, RegisterSetCounter> register_sets;
 		#endif
 
 		uint64_t subtree_hash = 0;
@@ -518,21 +542,22 @@ class InstructionNode{
 		}
 		
 		virtual nlohmann::ordered_json to_json(){
+			
 			nlohmann::ordered_json jsonNode;
 			jsonNode["instruction"] = Opcode::mappingStr[instruction];
 			jsonNode["type"] = get_node_type();
 			jsonNode["weight"] = weight;
+			jsonNode["true_weight"] = true_weight;
 			jsonNode["subtree_hash"] = subtree_hash;
 
 			#ifdef trace_individual_registers
-			nlohmann::json jsonRegisterSets = nlohmann::json::object();
-			for (const auto& entry : register_sets) {
-				uint64_t key = entry.first;
-				const RegisterSet& rs = entry.second;
-				jsonRegisterSets[std::to_string(key)] = { rs.rs1, rs.rs2, rs.rd };
-			}
-
-			jsonNode["register_sets"] = jsonRegisterSets;
+				nlohmann::json jsonRegisterSets = nlohmann::json::object();
+				for (const auto& entry : register_sets) {
+					uint64_t key = entry.first;
+					const RegisterSetCounter& rsc = entry.second;
+					jsonRegisterSets[std::to_string(key)] = { {"count", rsc.count}, {"rs1", rsc.regset.rs1}, {"rs2", rsc.regset.rs2}, {"rd", rsc.regset.rd} };
+				}
+				jsonNode["register_sets"] = jsonRegisterSets;
 			#endif 
 			//convert dependencies
 			std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
@@ -592,6 +617,7 @@ class InstructionNode{
 					<< tree << ";" //Tree
 					<< instruction_string << ";" //This instruction 
 					<< weight << ";"
+					<< true_weight << ";"
 					<< last_weight - weight << ";"
 					<< max_weight - weight << ";"
 					<< total_max_weight - weight << ";"
@@ -680,13 +706,23 @@ class InstructionNode{
 			return 1.0;
 		}
 		//dependencies should be 0 if not applicable
-		virtual void update_weight(const StepUpdateInfo& p){
+		virtual void update_weight(const StepUpdateInfo& p, uint32_t depth = 0){
 			weight++; 
 			total_cycles += p.cycles;
 			//sum_step_ids += p.step; //TODO add curent step
+			
+			// Update true_weight only if this sequence was not already counted
+			if ((last_occurrence + depth) <= p.step) {
+				true_weight++;
+				last_occurrence = p.step;
+			}
+			
 			#ifdef trace_individual_registers
-			if(!register_sets.count(p.pc)){
-				register_sets.emplace(p.pc, RegisterSet{p.rs1, p.rs2, p.rd});
+			auto it = register_sets.find(p.pc);
+			if(it == register_sets.end()) {
+				register_sets.emplace(p.pc, RegisterSetCounter{p.rs1, p.rs2, p.rd});
+			} else {
+				it->second.count++;
 			}
 			#endif
 			#ifdef handle_self_modifying_code
@@ -858,7 +894,7 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 
 	nlohmann::ordered_json to_json() override;
 
-	virtual void update_weight(const StepUpdateInfo& p);
+	virtual void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
 	std::map<uint64_t, int> get_pc() override;
 	NODE_TYPE get_node_type() override;
 };
@@ -915,7 +951,7 @@ class InstructionNodeMemory : public InstructionNodeR, virtual public MemoryNode
 
 		void _print(uint8_t level) override;
 
-		void update_weight(const StepUpdateInfo& p) override;
+		void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
@@ -940,7 +976,7 @@ class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public Mem
 
 		void _print(uint8_t level) override;
 
-		void update_weight(const StepUpdateInfo& p) override;
+		void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 

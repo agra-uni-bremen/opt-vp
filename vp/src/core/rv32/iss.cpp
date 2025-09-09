@@ -2451,8 +2451,8 @@ void ISS::show() {
 	printf("start analysis\n");
 	std::vector<Path> tmp_discovered_sub_sequences; 
 	auto sf = [](ScoreParams p) -> float {
-		float score = (p.length * p.weight) * p.score_multiplier 
-			+ p.weight * p.score_bonus; //length * minimum_weight;
+		float score = (p.length * p.weight);// * p.score_multiplier 
+			//+ p.weight * p.score_bonus; //length * minimum_weight;
 		return score;
 	};
 	for (InstructionNodeR& tree : instruction_trees){
@@ -2551,7 +2551,9 @@ void ISS::show() {
 
 		{
 			std::ofstream csv_out(csv_stats, std::ios::app);
+			#ifdef output_stats
 			p.to_csv_stats(csv_out);
+			#endif
 		}
 
 		tmp_discovered_sub_sequences = p.end_of_sequence->force_path_extension(p, sf);
@@ -2592,6 +2594,13 @@ void ISS::show() {
 		#endif
 	}
 
+	{
+		#ifdef output_stats
+		std::ofstream csv_out(csv_stats, std::ios::app);
+		csv_out << csrs.instret.reg << ";" "\n";
+		#endif
+	}
+	
 	if(output_as_json){
 		output_json(cout_save, discovered_sequences_node_list, 
 			discovered_sub_sequences_node_lists, 

@@ -1,12 +1,12 @@
-int sum(int end);
+int main(){
 
-int x = 5;
-int y;
+    int img1[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    int img2[16] = {11,12,13,14,15,16,17,18,19,110,111,112,113,114,115,116};
+    int img3[16] = {0}; 
 
-int main() {
-	int a = 6;
-	int b = 7;
-	a = a + b + x + y;
-	a = sum(a);
-	return a;
+    for(int i=0;i<16; i++){
+        img3[i] = img1[i] + img2[i];
+    }
+
+    return 42; 
 }
