@@ -2,6 +2,9 @@
 
 #include "instr.h"
 #include <set>
+#include <unordered_set>
+#include <unordered_map>
+
 #include <bitset>
 #include <fstream>
 
@@ -80,7 +83,7 @@ struct ExecutionInfo {
 	AccessType last_memory_access_type;
 	uint64_t last_stack_pointer;
 	uint64_t last_frame_pointer;
-
+	
 	uint64_t last_step_id;
 };
 
@@ -143,6 +146,13 @@ struct StepUpdateInfo {
 	uint64_t frame_pointer;
 };
 
+// Hash for pair<uint64_t, Opcode::MemoryRegion>
+struct pair_hash {
+	std::size_t operator()(const std::pair<uint64_t, Opcode::MemoryRegion>& p) const {
+		return std::hash<uint64_t>{}(p.first) ^ (std::hash<int>{}(static_cast<int>(p.second)) << 1);
+	}
+};
+
 class InstructionNode;
 
 struct Path
@@ -156,7 +166,7 @@ struct Path
 	std::vector<uint64_t> path_hashes;
 	std::vector<Opcode::Mapping> opcodes;
 	InstructionNode* end_of_sequence;
-
+	
 	//double score = 0; //TODO should this be saved here? How should we handle initialization?
 
 	float get_score(std::function <float(ScoreParams)> score_function){
@@ -168,7 +178,7 @@ struct Path
 		num_children, inputs, outputs, score_multiplier, score_bonus};
 		float score_result = score_function(params);
 		if(score_result < 0){
-			printf("[ERROR] Score function returned negative score: %f\nweight: %ld\nlength: %ld\n", score_result, minimum_weight, length);
+			printf("[ERROR] Score function returned negative score: %f\nweight: %lu\nlength: %u\n", score_result, minimum_weight, length);
 			score_result = INFINITY;
 		}
 		return score_result;
@@ -720,7 +730,7 @@ class InstructionNode{
 			#ifdef trace_individual_registers
 			auto it = register_sets.find(p.pc);
 			if(it == register_sets.end()) {
-				register_sets.emplace(p.pc, RegisterSetCounter{p.rs1, p.rs2, p.rd});
+				register_sets.emplace(p.pc, RegisterSetCounter{static_cast<int8_t>(p.rs1), static_cast<int8_t>(p.rs2), static_cast<int8_t>(p.rd)});
 			} else {
 				it->second.count++;
 			}
@@ -735,15 +745,15 @@ class InstructionNode{
 				}
 			}
 			#endif
-			if(p.step > O_MID){
-				occurrence[3]++;
-			}else if(p.step > O_BEGINNING){
-				occurrence[2]++;
-			}else if(p.step > O_STARTUP){
-				occurrence[1]++;
-			}else{
-				occurrence[0]++;
-			}
+			// if(p.step > O_MID){
+			// 	occurrence[3]++;
+			// }else if(p.step > O_BEGINNING){
+			// 	occurrence[2]++;
+			// }else if(p.step > O_STARTUP){
+			// 	occurrence[1]++;
+			// }else{
+			// 	occurrence[0]++;
+			// }
 			if(p.dependency1>0){
 				dependencies_true_[p.dependency1] = true;
 			}else if(p.input1>=0){
@@ -903,7 +913,7 @@ class MemoryNode{
 	public: 
 		bool is_store = false;
 		//Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;//Stack(current frame=1 else 2) or Heap (4) or both (3,5,6,7)
-		std::map<uint64_t, std::set<std::pair<uint64_t, Opcode::MemoryRegion>>> memory_accesses;
+		std::unordered_map<uint64_t, std::unordered_set<std::pair<uint64_t, Opcode::MemoryRegion>, pair_hash>> memory_accesses;
 		uint64_t last_access = 0;
 		uint64_t access_offset_sum = 0;
 

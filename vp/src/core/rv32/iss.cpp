@@ -155,6 +155,15 @@ void ISS::exec_step() {
 		pc += 4;
 	}
 
+	if (csrs.instret.reg % 1000000 == 0 && csrs.instret.reg > 0) {
+		printf("[Progress] Executed %u instructions. Last 5 steps:\n", csrs.instret.reg);
+		for (int i = 0; i < 5; ++i) {
+			int idx = (ring_buffer_index + INSTRUCTION_TREE_DEPTH - i) % INSTRUCTION_TREE_DEPTH;
+			auto &step = last_executed_steps[idx];
+			printf("  PC: 0x%08x, Opcode: %s\n", step.last_executed_pc, Opcode::mappingStr[step.last_executed_instruction]);
+		}
+	}
+
 	uint64_t cycles_diff = _compute_and_get_current_cycles() - prev_cycles;
 
 //Instead of updateing the entry at the start of the loop with data from the last iteration
@@ -2099,7 +2108,7 @@ LoadedLibrary load_scoring_functions(const std::string& libraryPath){
 void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNodeR> instruction_trees){
 	std::vector<std::vector<Path>> best_sequences_for_sf; 
 	uint32_t score_function_index = 0;
-	for (auto &&score_function : score_functions)
+	for ([[maybe_unused]] auto &&score_function : score_functions)
 	{
 		std::vector<Path> tmp_best_sequences; 
 		auto _sf = score_functions[score_function_index];
@@ -2121,7 +2130,7 @@ void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std
 	for (auto &&sequences : best_sequences_for_sf)
 	{
 		printf("\nBest sequences for score function %d:\n", sf_index);
-		for (size_t i = 0; i < std::min(3, (int)sequences.size()); i++) //print the best 3 sequences for each score function
+		for (size_t i = 0; i < std::min(static_cast<size_t>(3), sequences.size()); i++) //print the best 3 sequences for each score function
 		{
 			sequences[i].show();
 		}

@@ -3,6 +3,8 @@ MAKEFLAGS += --no-print-directory
 # Whether to use a system-wide SystemC library instead of the vendored one.
 USE_SYSTEM_SYSTEMC ?= OFF
 
+BUILD_TYPE ?= Debug
+
 vps: vp/src/core/common/gdb-mc/libgdb/mpc/mpc.c vp/build/Makefile
 	$(MAKE) install -C vp/build
 
@@ -13,7 +15,7 @@ all: vps vp-display
 
 vp/build/Makefile:
 	mkdir -p vp/build
-	cd vp/build && cmake -DUSE_SYSTEM_SYSTEMC=$(USE_SYSTEM_SYSTEMC) ..
+	cd vp/build && cmake -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DUSE_SYSTEM_SYSTEMC=$(USE_SYSTEM_SYSTEMC) ..
 
 vp-eclipse:
 	mkdir -p vp-eclipse
@@ -28,7 +30,7 @@ vp-display: env/basic/vp-display/build/Makefile
 
 scoring-functions:
 	mkdir -p vp/build
-	cd vp/build && cmake -DUSE_SYSTEM_SYSTEMC=$(USE_SYSTEM_SYSTEMC) ..
+	cd vp/build && cmake -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DUSE_SYSTEM_SYSTEMC=$(USE_SYSTEM_SYSTEMC) ..
 	cd vp/src/scoring_functions && cmake .
 	$(MAKE) -C vp/src/scoring_functions
 

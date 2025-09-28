@@ -112,9 +112,9 @@ void InstructionNodeR::insert_rb(
 		int8_t tmp_true_dependency1 = -1;
 		int8_t tmp_true_dependency2 = -1;
 
-		int8_t memory_true_dependency = -1;
-		int8_t memory_output_dependency = -1;
-		int8_t memory_anti_dependency = -1;
+		[[maybe_unused]] int8_t memory_true_dependency = -1;
+		[[maybe_unused]] int8_t memory_output_dependency = -1;
+		[[maybe_unused]] int8_t memory_anti_dependency = -1;
 
 		uint64_t l_read; 
 		uint64_t l_store;
@@ -824,7 +824,7 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 		if(max_child_path.length==0){ //should not happen with force_extension
 			max_child_path = child_path;
 		}else{
-			if(p.force_extension_depth+1 == p.length && p.force_instruction == child->instruction){
+			if(static_cast<uint32_t>(p.force_extension_depth+1) == p.length && p.force_instruction == child->instruction){
 				//force_extension is -1 if not forcing extension
 				//if instruction == child->instruction
 				//set child_path as new max_child without checking score and break
@@ -840,7 +840,7 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 
 	if (max_child_path.length>0)
 	{
-		if((max_path.get_score(p.score_function) < max_child_path.get_score(p.score_function)) || p.force_extension_depth+1==p.length){
+		if((max_path.get_score(p.score_function) < max_child_path.get_score(p.score_function)) || static_cast<uint32_t>(p.force_extension_depth+1)==p.length){
 			max_path.length = max_child_path.length;
 			max_path.minimum_weight = max_child_path.minimum_weight;
 			max_path.opcodes.insert(max_path.opcodes.end(), 
@@ -1123,17 +1123,15 @@ MemoryNode::MemoryNode(bool is_store_instruction) : is_store(is_store_instructio
 void MemoryNode::register_access(uint64_t pc, uint64_t address, 
 	AccessType access_type, uint64_t prev_access, 
 				uint64_t stackpointer, uint64_t framepointer){
-					uint64_t access_offset = abs((long int)(address-last_access));
-					access_offset_sum += access_offset;
-					int64_t accessor_diff = 0; 
+	uint64_t access_offset = abs((long int)(address-last_access));
+	access_offset_sum += access_offset;
+	int64_t accessor_diff = 0; 
+	accessor_diff = prev_access - last_access;
 
-		accessor_diff = prev_access - last_access;
-	
 	Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;
 	if(framepointer>0 && address <= framepointer && address >= stackpointer){
 		//address is in Frame
 		memory_location = memory_location | MemoryRegion::FRAME;
-		//printf("FRAME Access %lx\n",address);
 	}else{
 		if(address<stackpointer){
 			//address is not on the Stack
@@ -1145,21 +1143,10 @@ void MemoryNode::register_access(uint64_t pc, uint64_t address,
 			//printf("STACK Access %lx\n",address);
 		}
 	}
-	auto& access_entry = memory_accesses[pc]; //If the entry does not exist, it is created
-	// Check if a pair with memory_location is already in the set
-	bool found = false;
-	for (const auto& entry : access_entry) {
-		if (static_cast<Opcode::MemoryRegion>(entry.first) == memory_location) {
-			found = true;
-			break;
-		}
-	}
-
-	// Add the pair (memory_location, memory_location) to the set if not already contained
-	if (!found) {
-		access_entry.insert({address, memory_location});
-	}
-}	
+	// Use unordered_set for O(1) lookup/insert
+	auto& access_entry = memory_accesses[pc];
+	access_entry.insert({address, memory_location});
+}
 
 InstructionNodeMemory::InstructionNodeMemory(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t memory_access, bool is_store_instruction)
 			: InstructionNode(instruction, parent_hash), 

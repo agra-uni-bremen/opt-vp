@@ -25,7 +25,7 @@ struct TinyOptions : public Options {
 public:
 	typedef unsigned int addr_t;
 
-	addr_t mem_size = 1024 * 1024 * 32 * 6;  // 32 MB ram, to place it before the CLINT and run the base examples (assume
+	addr_t mem_size = 1024 * 1024 * 32 * 12;  // 32 MB ram, to place it before the CLINT and run the base examples (assume
 	                                     // memory start at zero) without modifications
 	addr_t mem_start_addr = 0x00000000;
 	addr_t mem_end_addr = mem_start_addr + mem_size - 1;

@@ -7,7 +7,7 @@
 # fi
 
 directory1="sw"
-directory2="../embench-iot/bd_O3/src"
+directory2="../embench-iot/bd/src"
 app_list1=("asm-anti" "asm-two-branches" "basic-asm-test")
 app_list2=("md5sum" "crc32" "aha-mont64" "edn" "huffbench" "matmult-int" "tarfind" "ud" "minver" "nettle-aes" "nettle-sha256" "nsichneu" "picojpeg" "primecount" "qrduino" "sglib-combined" "slre" "depthconv")
 
@@ -16,9 +16,9 @@ default_app="main"
 run_application() {
   local input_file="$1"
   local app_name="$2"
-  local out_dir="./out/$app_name"
+  local out_dir="./out/set_DATE_1/$app_name"
   mkdir -p "$out_dir"
-  local command="./vp/build/bin/tiny32-vp --intercept-syscalls '$input_file' --output-file '$out_dir/'"
+  local command="./vp/build/bin/tiny32-vp --intercept-syscalls '$input_file' --output-file '$out_dir/' -e --csv"
   echo "Executing: $command"
   eval "$command"
 }
