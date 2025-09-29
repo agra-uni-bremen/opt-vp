@@ -263,6 +263,9 @@ void ISS::exec_step() {
 	}
 
 		//printf("OP: %s\n", Opcode::mappingStr[op]);
+	#ifdef trace_parameter
+	int32_t last_parameter = -1;
+	#endif
 
 	switch (op) {
 		case Opcode::UNDEF:
@@ -304,9 +307,15 @@ void ISS::exec_step() {
 			regs[instr.rd()] = regs[instr.rs1()] - regs[instr.rs2()];
 			break;
 
-		case Opcode::SLL:
-			regs[instr.rd()] = regs[instr.rs1()] << regs.shamt(instr.rs2());
+		case Opcode::SLL: {
+			auto shift_amount = regs.shamt(instr.rs2());
+			regs[instr.rd()] = regs[instr.rs1()] << shift_amount;
+			
+			#ifdef trace_parameter
+			last_parameter = shift_amount;
+			#endif
 			break;
+		}
 
 		case Opcode::SLT:
 			regs[instr.rd()] = regs[instr.rs1()] < regs[instr.rs2()];
@@ -316,13 +325,25 @@ void ISS::exec_step() {
 			regs[instr.rd()] = ((uint32_t)regs[instr.rs1()]) < ((uint32_t)regs[instr.rs2()]);
 			break;
 
-		case Opcode::SRL:
-			regs[instr.rd()] = ((uint32_t)regs[instr.rs1()]) >> regs.shamt(instr.rs2());
-			break;
+		case Opcode::SRL: {
+			auto shift_amount = regs.shamt(instr.rs2());
+			regs[instr.rd()] = ((uint32_t)regs[instr.rs1()]) >> shift_amount;
 
-		case Opcode::SRA:
-			regs[instr.rd()] = regs[instr.rs1()] >> regs.shamt(instr.rs2());
+			#ifdef trace_parameter
+			last_parameter = shift_amount;
+			#endif
 			break;
+		}
+
+		case Opcode::SRA: {
+			auto shift_amount = regs.shamt(instr.rs2());
+			regs[instr.rd()] = regs[instr.rs1()] >> shift_amount;
+
+			#ifdef trace_parameter
+			last_parameter = shift_amount;
+			#endif
+			break;
+		}
 
 		case Opcode::XOR:
 			regs[instr.rd()] = regs[instr.rs1()] ^ regs[instr.rs2()];
@@ -338,14 +359,23 @@ void ISS::exec_step() {
 
 		case Opcode::SLLI:
 			regs[instr.rd()] = regs[instr.rs1()] << instr.shamt();
+			#ifdef trace_parameter
+			last_parameter = instr.shamt();
+			#endif
 			break;
 
 		case Opcode::SRLI:
 			regs[instr.rd()] = ((uint32_t)regs[instr.rs1()]) >> instr.shamt();
+			#ifdef trace_parameter
+			last_parameter = instr.shamt();
+			#endif
 			break;
 
 		case Opcode::SRAI:
 			regs[instr.rd()] = regs[instr.rs1()] >> instr.shamt();
+			#ifdef trace_parameter
+			last_parameter = instr.shamt();
+			#endif
 			break;
 
 		case Opcode::LUI:
@@ -1288,6 +1318,7 @@ void ISS::exec_step() {
 		last_executed_steps[ring_buffer_index].last_step_id = total_num_instr;
 		last_executed_steps[ring_buffer_index].last_stack_pointer = regs[RegFile::sp];
 		last_executed_steps[ring_buffer_index].last_frame_pointer = regs[RegFile::fp];
+		last_executed_steps[ring_buffer_index].last_parameter = last_parameter;
 
 		last_executed_steps[ring_buffer_index].last_memory_access_type = std::get<1>(last_memory_access);
 		if(std::get<1>(last_memory_access)==AccessType::STORE){//check if memory was accessed in the last execution step
@@ -2460,7 +2491,7 @@ void ISS::show() {
 	printf("start analysis\n");
 	std::vector<Path> tmp_discovered_sub_sequences; 
 	auto sf = [](ScoreParams p) -> float {
-		float score = (p.length * p.weight);// * p.score_multiplier 
+		float score = (p.length * p.weight);// * p.score_multiplier //TODO update to use true weight instead
 			//+ p.weight * p.score_bonus; //length * minimum_weight;
 		return score;
 	};
@@ -2493,6 +2524,7 @@ void ISS::show() {
 								std::string(".csv");
 
 	// Write CSV header once, before the loop
+	#ifdef output_stats
 	{
 		std::ofstream csv_out(csv_stats, std::ios::app);
 		csv_out.seekp(0, std::ios::end);
@@ -2503,6 +2535,7 @@ void ISS::show() {
 			csv_out << "\n"; // Add a newline to separate from previous content
 		}
 	}
+	#endif
 
 	printf("\n -----------------\n| Best Sequences |\n -----------------\n");
 	for (auto &&p : discovered_sequences)

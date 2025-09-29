@@ -26,11 +26,12 @@
 
 #define trace_pcs
 #define log_pcs
-#define output_stats
+//#define output_stats //output a summary of the VP analysis 
 // #define debug_register_dependencies
 //#define debug_dependencies
 // #define handle_self_modifying_code
 #define trace_individual_registers
+#define trace_parameter //trace instruction parameters like shift amount
 
 //#define dot_pc_on_pruned_nodes
 
@@ -83,6 +84,8 @@ struct ExecutionInfo {
 	AccessType last_memory_access_type;
 	uint64_t last_stack_pointer;
 	uint64_t last_frame_pointer;
+
+	int32_t last_parameter;
 	
 	uint64_t last_step_id;
 };
@@ -108,6 +111,8 @@ struct StepInsertInfo {
 	AccessType access_type;
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
+	// Parameter tracking fields
+	int32_t parameter; // currently used for: Shift
 };
 
 struct ScoreParams {
@@ -144,13 +149,7 @@ struct StepUpdateInfo {
 	AccessType access_type;
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
-};
-
-// Hash for pair<uint64_t, Opcode::MemoryRegion>
-struct pair_hash {
-	std::size_t operator()(const std::pair<uint64_t, Opcode::MemoryRegion>& p) const {
-		return std::hash<uint64_t>{}(p.first) ^ (std::hash<int>{}(static_cast<int>(p.second)) << 1);
-	}
+	int32_t parameter; // currently used for: Shift 
 };
 
 class InstructionNode;
@@ -365,6 +364,8 @@ class InstructionNode{
 		//update last_occurrence when true_weight is updated 
 		//true weight is updated if current step id > last_occurrence + depth
 		uint64_t last_occurrence = 0;
+
+		std::unordered_map<uint64_t, std::unordered_map<int32_t, uint64_t>> parameters;
 
 		uint64_t total_cycles = 0;
 		//sum of the step ids this node occurred in
@@ -609,6 +610,10 @@ class InstructionNode{
 			jsonNode["outputs"] = outputs;
 
 			jsonNode["occurrence"] = occurrence;
+			
+			#ifdef trace_parameter
+			jsonNode["parameters"] = parameters;
+			#endif
 
 			return jsonNode;
 	}
@@ -726,6 +731,33 @@ class InstructionNode{
 				true_weight++;
 				last_occurrence = p.step;
 			}
+
+			#ifdef trace_parameter
+			// Track instruction parameters based on instruction type
+			using namespace Opcode;
+			if(depth > 0){//do not track parameters for root node as this adds a high amount of overhead and entries with almost not benefit
+				switch (instruction) {
+					// Shift instructions - track shift amount
+					case SLL:
+					case SRL:
+					case SRA:
+					case SLLI:
+					case SRLI:
+					case SRAI:{
+						//TODO move definition outside of case if adding more parameters
+						auto& param_entry = parameters[p.pc]; //fetch reference to parameter entry for this pc
+						if (p.parameter >= 0) {
+							param_entry[p.parameter]++; // Increment count for this parameter value
+						}
+						}
+						break;
+					
+					default:
+						// No specific parameters to track for this instruction
+						break;
+				}
+			}
+			#endif
 			
 			#ifdef trace_individual_registers
 			auto it = register_sets.find(p.pc);
@@ -913,7 +945,7 @@ class MemoryNode{
 	public: 
 		bool is_store = false;
 		//Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;//Stack(current frame=1 else 2) or Heap (4) or both (3,5,6,7)
-		std::unordered_map<uint64_t, std::unordered_set<std::pair<uint64_t, Opcode::MemoryRegion>, pair_hash>> memory_accesses;
+		std::unordered_map<uint64_t, std::unordered_map<uint64_t, Opcode::MemoryRegion>> memory_accesses;
 		uint64_t last_access = 0;
 		uint64_t access_offset_sum = 0;
 

@@ -25,6 +25,22 @@ func1:
 add a2, a0, a1
 and a3, a2, a1
 or a4, a3, a1
+# Shift instructions - register shifts
+sll a5, a0, a1      # Shift left logical (register)
+srl a5, a2, a1      # Shift right logical (register)
+sra a5, a3, a1      # Shift right arithmetic (register)
+# Shift instructions - immediate shifts
+slli a5, a0, 3      # Shift left logical immediate by 3
+slli a5, a0, 3 
+slli a5, a0, 3 
+slli a5, a0, 3 
+slli a5, a0, 3 
+slli a5, a0, 3 
+slli a5, a0, 3 
+slli a5, a0, 5 
+slli a5, a0, 5 
+srli a5, a2, 5      # Shift right logical immediate by 5
+srai a5, a4, 2      # Shift right arithmetic immediate by 2
 addi a5, a5, 1
 addi a5, a6, 2
 addi a5, a7, 3

@@ -395,7 +395,8 @@ void InstructionNodeR::insert_rb(
 									last_memory_access,
 									access_type,
 									current_step->last_stack_pointer,
-									current_step->last_frame_pointer
+									current_step->last_frame_pointer,
+									current_step->last_parameter
 									});
 			// inserted_nodes[i] = current_node;
 		}else{
@@ -408,7 +409,8 @@ void InstructionNodeR::insert_rb(
 			last_memory_access,
 			access_type,
 			current_step->last_stack_pointer,
-			current_step->last_frame_pointer
+			current_step->last_frame_pointer,
+			current_step->last_parameter
 			}, 0); //depth is 0 as this is the root node
 		}
 	}
@@ -504,7 +506,8 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 								p.memory_address,
 								p.access_type,
 								p.stack_pointer,
-								p.frame_pointer
+								p.frame_pointer,
+								p.parameter
 							}, p.depth);
 
 	return found_child;
@@ -1143,9 +1146,9 @@ void MemoryNode::register_access(uint64_t pc, uint64_t address,
 			//printf("STACK Access %lx\n",address);
 		}
 	}
-	// Use unordered_set for O(1) lookup/insert
+	// Use unordered_map for O(1) lookup/insert
 	auto& access_entry = memory_accesses[pc];
-	access_entry.insert({address, memory_location});
+	access_entry[address] = memory_location;
 }
 
 InstructionNodeMemory::InstructionNodeMemory(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t memory_access, bool is_store_instruction)
