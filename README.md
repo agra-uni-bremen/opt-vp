@@ -12,9 +12,13 @@ Unfortunately, identifying, designing, and evaluating application-specific optim
 
 In order to combine the advantages of high-level and lowlevel approaches we propose this Virtual Prototype to automatically identify promising hardware optimization candidates based on recurring patterns. 
 
-
+----
 
 For information about the base RISC-V VP please visit [the base repository](https://github.com/agra-uni-bremen/riscv-vp)
+
+If you are interested in this project please take a look at the related [publications](#publications) or feel free to reach out to one of the corresponding authors  
+
+----
 
 ## :dart: Additional Features
 
@@ -65,10 +69,14 @@ Additional arguments include
 * `--seq` to output the best sequences used in [opt-seq](https://github.com/agra-uni-bremen/opt-seq)
 * `-i` to enter interactive mode after the simulation has finished
 
+## Publications  
+The concepts behind the Opt-VP are further described in the following publications:  
+#### [Paper introducing the VP](https://ieeexplore.ieee.org/abstract/document/10272131)  
+#### [Extended Abstract for latest results](https://riscv-europe.org/summit/2025/media/proceedings/2025-05-13-RISC-V-Summit-Europe-P1.1.07-ZIELASKO-abstract.pdf)  
 
+   
 #### Acknowledgements:
 
-The Opt-VP extension was supported in part by the German Federal Ministry of
-Education and Research (BMBF) within projects Scale4Edge under grant no.
+The Opt-VP extension was supported in part by the German Federal Ministry of Research, Technology and Space (BMFTR) within projects Scale4Edge under grant no.
 16ME0127, ECXL under grant no. 01IW22002 and VE-HEP under grant no. 16KIS1342.
 
