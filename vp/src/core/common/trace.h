@@ -149,7 +149,7 @@ struct StepUpdateInfo {
 	AccessType access_type;
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
-	int32_t parameter; // currently used for: Shift 
+	int32_t parameter; // currently used for: Shift and Branch Targets
 };
 
 class InstructionNode;
@@ -751,7 +751,21 @@ class InstructionNode{
 						}
 						}
 						break;
-					
+					case JAL:
+					case JALR:
+					case BEQ:
+					case BNE:
+					case BLT:
+					case BLTU:
+					case BGE:
+					case BGEU:{
+						auto& param_entry = parameters[p.pc]; //fetch reference to parameter entry for this pc
+						if (p.parameter >= 0) {
+							param_entry[p.parameter]++; // Increment count for this parameter value
+						}
+						}
+						break;
+						
 					default:
 						// No specific parameters to track for this instruction
 						break;
@@ -967,6 +981,7 @@ class MemoryNode{
 
 class BranchNode{
 	public: 
+		// std::unordered_map<uint64_t, std::unordered_set<uint64_t>> jump_targets; //Handled as a parameter
 		std::map<uint64_t, uint64_t> relative_offsets;
 		bool is_backward_jump = false;
 		bool is_forward_jump = false;

@@ -156,11 +156,14 @@ void ISS::exec_step() {
 	}
 
 	if (csrs.instret.reg % 1000000 == 0 && csrs.instret.reg > 0) {
-		printf("[Progress] Executed %u instructions. Last 5 steps:\n", csrs.instret.reg);
+		// colored progress output (ANSI colors)
+		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%u\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
 		for (int i = 0; i < 5; ++i) {
 			int idx = (ring_buffer_index + INSTRUCTION_TREE_DEPTH - i) % INSTRUCTION_TREE_DEPTH;
 			auto &step = last_executed_steps[idx];
-			printf("  PC: 0x%08x, Opcode: %s\n", step.last_executed_pc, Opcode::mappingStr[step.last_executed_instruction]);
+			printf("  PC: \x1b[33m0x%08x\x1b[0m, Opcode: \x1b[35m%s\x1b[0m\n",
+				   step.last_executed_pc,
+				   Opcode::mappingStr[step.last_executed_instruction]);
 		}
 	}
 
@@ -264,7 +267,7 @@ void ISS::exec_step() {
 
 		//printf("OP: %s\n", Opcode::mappingStr[op]);
 	#ifdef trace_parameter
-	int32_t last_parameter = -1;
+	int64_t last_parameter = -1;
 	#endif
 
 	switch (op) {
@@ -391,6 +394,9 @@ void ISS::exec_step() {
 			pc = last_pc + instr.J_imm();
 			trap_check_pc_alignment();
 			regs[instr.rd()] = link;
+			#ifdef trace_parameter
+			last_parameter = pc;
+			#endif
 		} break;
 
 		case Opcode::JALR: {
@@ -398,6 +404,9 @@ void ISS::exec_step() {
 			pc = (regs[instr.rs1()] + instr.I_imm()) & ~1;
 			trap_check_pc_alignment();
 			regs[instr.rd()] = link;
+			#ifdef trace_parameter
+			last_parameter = pc;
+			#endif
 		} break;
 
 		case Opcode::SB: {
@@ -458,6 +467,9 @@ void ISS::exec_step() {
 			if (regs[instr.rs1()] == regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
+				#ifdef trace_parameter
+				last_parameter = pc;
+				#endif
 			}
 			break;
 
@@ -465,6 +477,9 @@ void ISS::exec_step() {
 			if (regs[instr.rs1()] != regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
+				#ifdef trace_parameter
+				last_parameter = pc;
+				#endif
 			}
 			break;
 
@@ -472,6 +487,9 @@ void ISS::exec_step() {
 			if (regs[instr.rs1()] < regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
+				#ifdef trace_parameter
+				last_parameter = pc;
+				#endif
 			}
 			break;
 
@@ -479,6 +497,9 @@ void ISS::exec_step() {
 			if (regs[instr.rs1()] >= regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
+				#ifdef trace_parameter
+				last_parameter = pc;
+				#endif
 			}
 			break;
 
@@ -486,6 +507,9 @@ void ISS::exec_step() {
 			if ((uint32_t)regs[instr.rs1()] < (uint32_t)regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
+				#ifdef trace_parameter
+				last_parameter = pc;
+				#endif
 			}
 			break;
 
@@ -493,6 +517,9 @@ void ISS::exec_step() {
 			if ((uint32_t)regs[instr.rs1()] >= (uint32_t)regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
+				#ifdef trace_parameter
+				last_parameter = pc;
+				#endif
 			}
 			break;
 

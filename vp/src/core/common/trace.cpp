@@ -947,6 +947,7 @@ int InstructionNodeR::prune_tree(uint64_t weight_threshold, uint8_t depth){
 					der_child->subtree_hash, -1, 0);
 					new_child->pc_map = der_child->get_pc();
 					new_child->relative_offsets = der_child->relative_offsets;
+					//new_child->jump_targets = der_child->jump_targets; //handled as parameter  
 					// delete child;
 					child = new_child;
 			}
