@@ -99,7 +99,7 @@ ISS::ISS(uint32_t hart_id, const char *output_filestr, const char *input_filestr
 	cycle_time = sc_core::sc_time(10, sc_core::SC_NS);
 
 	output_filename = output_filestr;
-	path_hashes = &input_hashes[0];
+	path_hashes = input_hashes.data();
 	input_filename = input_filestr;
 
 	assert(qt >= cycle_time);
