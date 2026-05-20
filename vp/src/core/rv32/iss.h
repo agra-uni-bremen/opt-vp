@@ -193,6 +193,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	bool output_as_json = false;
 	bool output_full_export = false;
 	bool interactive_mode = false;
+	bool suppress_prompts = false;
+	bool allow_misaligned_access = false;
 
 	// last decoded and executed instruction and opcode
 	Instruction instr;
@@ -290,6 +292,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	void fp_update_exception_flags();
 	void fp_setup_rm();
 	void fp_require_not_off();
+	bool prompt_enable_isa(uint32_t ext_mask);
+	bool prompt_allow_misaligned_access(uint32_t addr, bool isLoad, unsigned alignment);
 
 	uint32_t get_csr_value(uint32_t addr);
 	void set_csr_value(uint32_t addr, uint32_t value);
@@ -316,6 +320,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	template <unsigned Alignment, bool isLoad>
 	inline void trap_check_addr_alignment(uint32_t addr) {
 		if (unlikely(addr % Alignment)) {
+			if (allow_misaligned_access || prompt_allow_misaligned_access(addr, isLoad, Alignment))
+				return;
 			raise_trap(isLoad ? EXC_LOAD_ADDR_MISALIGNED : EXC_STORE_AMO_ADDR_MISALIGNED, addr);
 		}
 	}

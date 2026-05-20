@@ -8,6 +8,8 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <poll.h>
+#include <unistd.h>
 
 #include <dlfcn.h>
 #include <cstdlib>
@@ -16,11 +18,34 @@
 
 using namespace rv32;
 
+static const char *isa_extension_name(uint32_t ext_mask) {
+	switch (ext_mask) {
+		case M_ISA_EXT:
+			return "M";
+		case A_ISA_EXT:
+			return "A";
+		case F_ISA_EXT:
+			return "F";
+		case D_ISA_EXT:
+			return "D";
+		case C_ISA_EXT:
+			return "C";
+		default:
+			return "unknown";
+	}
+}
+
 #define RAISE_ILLEGAL_INSTRUCTION() raise_trap(EXC_ILLEGAL_INSTR, instr.data());
 
-#define REQUIRE_ISA(X)          \
-    if (!(csrs.misa.reg & X))   \
-        RAISE_ILLEGAL_INSTRUCTION()
+/* #define REQUIRE_ISA(X)          \
+//     if (!(csrs.misa.reg & X))   \
+//         RAISE_ILLEGAL_INSTRUCTION()*/
+
+#define REQUIRE_ISA(X)                                       \
+		if (!(csrs.misa.reg & (X))) {                           \
+			if (!prompt_enable_isa((X)))                          \
+				RAISE_ILLEGAL_INSTRUCTION();                       \
+		}                                                      \
 
 #define RD instr.rd()
 #define RS1 instr.rs1()
@@ -140,6 +165,7 @@ void ISS::exec_step() {
 		uint32_t mem_word = instr_mem->load_instr(pc);
 		instr = Instruction(mem_word);
 	} catch (SimulationTrap &e) {
+		printf("[ISS] ERROR: instruction fetch fault at address 0x%08x\n", pc);
 		op = Opcode::UNDEF;
 		instr = Instruction(0);
 		throw;
@@ -157,11 +183,11 @@ void ISS::exec_step() {
 
 	if (csrs.instret.reg % 1000000 == 0 && csrs.instret.reg > 0) {
 		// colored progress output (ANSI colors)
-		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%u\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
+		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%lu\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
 		for (int i = 0; i < 5; ++i) {
 			int idx = (ring_buffer_index + INSTRUCTION_TREE_DEPTH - i) % INSTRUCTION_TREE_DEPTH;
 			auto &step = last_executed_steps[idx];
-			printf("  PC: \x1b[33m0x%08x\x1b[0m, Opcode: \x1b[35m%s\x1b[0m\n",
+			printf("  PC: \x1b[33m0x%08lx\x1b[0m, Opcode: \x1b[35m%s\x1b[0m\n",
 				   step.last_executed_pc,
 				   Opcode::mappingStr[step.last_executed_instruction]);
 		}
@@ -1742,9 +1768,91 @@ void ISS::fp_setup_rm() {
 	softfloat_roundingMode = rm;
 }
 
+bool ISS::prompt_enable_isa(uint32_t ext_mask) {
+	if (suppress_prompts)
+		return false;
+
+	const char *ext_name = isa_extension_name(ext_mask);
+	std::string reply;
+	static constexpr int kPromptTimeoutMs = 10000;
+	std::cout << "\x1b[31m[ERROR]\x1b[39m ISA extension " << ext_name
+	          << " is disabled. Enable for this session? [y/N] (timeout "
+	          << (kPromptTimeoutMs / 1000) << "s): " << std::flush;
+	pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
+	int poll_result = poll(&prompt_fd, 1, kPromptTimeoutMs);
+	if (poll_result <= 0) {
+		if (poll_result == 0)
+			std::cout << "\n\x1b[33m[WARN] Prompt timed out. ISA extension remains disabled.\x1b[39m" << std::endl;
+		return false;
+	}
+	if (!std::getline(std::cin, reply))
+		return false;
+	if (!reply.empty() && (reply[0] == 'y' || reply[0] == 'Y')) {
+		csrs.misa.reg |= ext_mask;
+		return true;
+	}
+	return false;
+}
+
+bool ISS::prompt_allow_misaligned_access(uint32_t addr, bool isLoad, unsigned alignment) {
+	if (suppress_prompts)
+		return false;
+
+	boost::io::ios_flags_saver ifs(std::cout);
+	std::string reply;
+	static constexpr int kPromptTimeoutMs = 10000;
+	std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
+	          << " access at 0x" << std::hex << addr << std::dec
+	          << " (alignment " << alignment << ").\n"
+	          << "Permit? \x1b[31m(This is very likely an error!)\x1b[39m [y] once, [a] always, [N] trap (timeout "
+	          << (kPromptTimeoutMs / 1000) << "s): \x1b[0m" << std::flush;
+	
+	pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
+	int poll_result = poll(&prompt_fd, 1, kPromptTimeoutMs);
+	if (poll_result <= 0) {
+		if (poll_result == 0)
+			std::cout << "\n\x1b[33m[WARN] Prompt timed out. Misaligned access not permitted." << std::endl;
+		return false;
+	}
+	if (!std::getline(std::cin, reply))
+		return false;
+	if (!reply.empty()) {
+		char c = reply[0];
+		if (c == 'y' || c == 'Y')
+			return true;
+		if (c == 'a' || c == 'A') {
+			allow_misaligned_access = true;
+			return true;
+		}
+	}
+	return false;
+}
+
 void ISS::fp_require_not_off() {
-	if (csrs.mstatus.fields.fs == FS_OFF)
+	if (csrs.mstatus.fields.fs == FS_OFF){
+		if (suppress_prompts)
+			RAISE_ILLEGAL_INSTRUCTION();
+		// in case FS is off, ask the user if they want to ignore the error for this session and turn FS on
+		std::string reply;
+		static constexpr int kPromptTimeoutMs = 10000;
+		std::cout << "\x1b[31m[ERROR]\x1b[39m Floating-point unit (FS) is off. Enable FP for this session? [y/N] (timeout "
+		          << (kPromptTimeoutMs / 1000) << "s): " << std::flush;
+		pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
+		int poll_result = poll(&prompt_fd, 1, kPromptTimeoutMs);
+		if (poll_result <= 0) {
+			if (poll_result == 0)
+				std::cout << "\n\x1b[33m[WARN] Prompt timed out. FP remains disabled.\x1b[39m" << std::endl;
+			RAISE_ILLEGAL_INSTRUCTION();
+		}
+		if (!std::getline(std::cin, reply))
+			RAISE_ILLEGAL_INSTRUCTION();
+		if (!reply.empty() && (reply[0] == 'y' || reply[0] == 'Y')) {
+			// enable FP in INITIAL state
+			csrs.mstatus.fields.fs = FS_INITIAL;
+			return;
+		}
 		RAISE_ILLEGAL_INSTRUCTION();
+	}
 }
 
 void ISS::return_from_trap_handler(PrivilegeLevel return_mode) {
@@ -1924,6 +2032,13 @@ PendingInterrupts ISS::compute_pending_interrupts() {
 	if (!pending)
 		return {NoneMode, 0};
 
+	if (trace)
+	{
+		printf("[vp::iss] compute pending interrupts, pending=%d, mie=%d, mip=%d\n",
+		       pending, csrs.mie.reg, csrs.mip.reg);
+	}
+	
+
 	auto m_pending = pending & ~csrs.mideleg.reg;
 	if (m_pending && (prv < MachineMode || (prv == MachineMode && csrs.mstatus.fields.mie))) {
 		return {MachineMode, m_pending};
@@ -2055,6 +2170,10 @@ void ISS::run_step() {
 
 		auto x = compute_pending_interrupts();
 		if (x.target_mode != NoneMode) {
+			if (trace)
+			{
+				printf("target_mode != NoneMode, pending=%d\n", x.pending);
+			}
 			prepare_interrupt(x);
 			switch_to_trap_handler(x.target_mode);
 		}
