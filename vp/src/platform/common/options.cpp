@@ -27,11 +27,33 @@ Options::Options(void) {
 		("reduce-graph,r", po::value<float>(&reduce_graph_output), "reduce graph output by omitting branches below this threshold (1.0 - 0.0)")
 		("path-hashes", po::value<std::vector<uint64_t>>(&input_hash_list)->multitoken(), "list of path hashes to trace parent paths for")
 		("interactive,i", po::bool_switch(&interactive_mode), "Instead of exiting after the simulation has finished, keep the internal state and wait for commands")
+		("suppress-prompts", po::bool_switch(&suppress_prompts), "suppress interactive prompts")
 		("output-file,o", po::value<std::string>(&output_file), "output dot file")
 		("input-file", po::value<std::string>(&input_program)->required(), "input file to use for execution");
 	// clang-format on
 
 	pos.add("input-file", 1);
+}
+
+void Options::add_memory_options(unsigned int &mem_start_addr, unsigned int &mem_size) {
+	add_options()
+		("memory-start", po::value<unsigned int>(&mem_start_addr), "set memory start address")
+		("memory-size", po::value<unsigned int>(&mem_size), "set memory size");
+}
+
+void Options::add_quiet_option(bool &quiet) {
+	add_options()
+		("quiet", po::bool_switch(&quiet), "do not output register values on exit");
+}
+
+void Options::add_use_e_base_isa_option(bool &use_E_base_isa) {
+	add_options()
+		("use-E-base-isa", po::bool_switch(&use_E_base_isa), "use the E instead of the I integer base ISA");
+}
+
+void Options::add_entry_point_option(OptionValue<unsigned long> &entry_point) {
+	add_options()
+		("entry-point", po::value<std::string>(&entry_point.option), "set entry point address (ISS program counter)");
 }
 
 Options::~Options(){};
@@ -79,4 +101,5 @@ void Options::printValues(std::ostream& os) const {
 	os << "tlm_global_quantum: " << tlm_global_quantum << std::endl;
 	os << "use_instr_dmi: " << use_instr_dmi << std::endl;
 	os << "use_data_dmi: " << use_data_dmi << std::endl;
+	os << "suppress-prompts: " << suppress_prompts << std::endl;
 }

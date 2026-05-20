@@ -19,7 +19,7 @@ struct OptionValue {
 	}
 };
 
-unsigned long parse_ulong_option(const std::string &s) {
+inline unsigned long parse_ulong_option(const std::string &s) {
 	bool is_hex = false;
 	if (s.size() >= 2) {
 		if ((s[0] == '0') && ((s[1] == 'x') || (s[1] == 'X')))

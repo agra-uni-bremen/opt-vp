@@ -50,9 +50,8 @@ public:
 
 	BasicOptions(void) {
         	// clang-format off
-		add_options()
-			("use-E-base-isa", po::bool_switch(&use_E_base_isa), "use the E instead of the I integer base ISA")
-			("entry-point", po::value<std::string>(&entry_point.option),"set entry point address (ISS program counter)");
+		add_use_e_base_isa_option(use_E_base_isa);
+		add_entry_point_option(entry_point);
         	// clang-format on
 	}
 
@@ -113,6 +112,7 @@ int sc_main(int argc, char **argv) {
 	core.output_as_csv = opt.output_as_csv;
 	core.output_as_json = opt.output_as_json;
 	core.output_full_export = opt.output_full_export;
+	core.suppress_prompts = opt.suppress_prompts;
 
 	// address mapping
 	bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

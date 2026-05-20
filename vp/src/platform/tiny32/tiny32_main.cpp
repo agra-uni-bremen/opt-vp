@@ -38,14 +38,10 @@ public:
 	bool use_E_base_isa = false;
 
 	TinyOptions(void) {
-		// clang-format off
-		add_options()
-			("quiet", po::bool_switch(&quiet), "do not output register values on exit")
-			("memory-start", po::value<unsigned int>(&mem_start_addr), "set memory start address")
-			("memory-size", po::value<unsigned int>(&mem_size), "set memory size")
-			("use-E-base-isa", po::bool_switch(&use_E_base_isa), "use the E instead of the I integer base ISA");
-        	// clang-format on
-        }
+		add_quiet_option(quiet);
+		add_memory_options(mem_start_addr, mem_size);
+		add_use_e_base_isa_option(use_E_base_isa);
+	}
 
 	void parse(int argc, char **argv) override {
 		Options::parse(argc, argv);
@@ -102,6 +98,7 @@ int sc_main(int argc, char **argv) {
 	core.output_as_json = opt.output_as_json;
 	core.output_full_export = opt.output_full_export;
 	core.interactive_mode = opt.interactive_mode;
+	core.suppress_prompts = opt.suppress_prompts;
 
 	// setup port mapping
 	bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

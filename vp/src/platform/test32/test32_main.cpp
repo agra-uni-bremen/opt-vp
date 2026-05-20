@@ -44,15 +44,14 @@ public:
     bool use_E_base_isa = false;
 
 	TestOptions(void) {
-		// clang-format off
-		add_options()
-			("memory-start", po::value<unsigned int>(&mem_start_addr),"set memory start address")
-			("memory-size", po::value<unsigned int>(&mem_size), "set memory size")
-			("use-E-base-isa", po::bool_switch(&use_E_base_isa), "use the E instead of the I integer base ISA")
-			("max-instrs", po::value<unsigned int>(&max_test_instrs), "maximum number of instructions to execute (soft limit, checked periodically)")
-			("signature", po::value<std::string>(&test_signature)->default_value(""), "output filename for the test execution signature")
-			("isa", po::value<std::string>(&isa)->default_value("imacfnus"), "output filename for the test execution signature");
-		// clang-format on
+        add_memory_options(mem_start_addr, mem_size);
+        add_use_e_base_isa_option(use_E_base_isa);
+        // clang-format off
+        add_options()
+            ("max-instrs", po::value<unsigned int>(&max_test_instrs), "maximum number of instructions to execute (soft limit, checked periodically)")
+            ("signature", po::value<std::string>(&test_signature)->default_value(""), "output filename for the test execution signature")
+            ("isa", po::value<std::string>(&isa)->default_value("imacfnus"), "ISA string for test execution (default: imacfnus)");
+        // clang-format on
 	}
 
 	void parse(int argc, char **argv) override {
@@ -136,6 +135,7 @@ int sc_main(int argc, char **argv) {
 	core.output_as_csv = opt.output_as_csv;
     core.output_full_export = opt.output_full_export;
 	core.output_as_json = opt.output_as_json;
+    core.suppress_prompts = opt.suppress_prompts;
 
     // setup port mapping
     bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

@@ -224,6 +224,7 @@ int sc_main(int argc, char **argv) {
 	core.output_as_json = opt.output_as_json;
 	core.output_full_export = opt.output_full_export;
 	core.interactive_mode = opt.interactive_mode;
+	core.suppress_prompts = opt.suppress_prompts;
 
 	// connect TLM sockets
 	iss_mem_if.isock.bind(bus.tsocks[0]);

@@ -64,10 +64,9 @@ public:
 
 	LinuxOptions(void) {
         	// clang-format off
+		add_memory_options(mem_start_addr, mem_size);
+		add_entry_point_option(entry_point);
 		add_options()
-			("memory-start", po::value<unsigned int>(&mem_start_addr),"set memory start address")
-			("memory-size", po::value<unsigned int>(&mem_size), "set memory size")
-			("entry-point", po::value<std::string>(&entry_point.option),"set entry point address (ISS program counter)")
 			("dtb-file", po::value<std::string>(&dtb_file)->required(), "dtb file for boot loading")
 			("tun-device", po::value<std::string>(&tun_device), "tun device used by SLIP");
         	// clang-format on
@@ -152,6 +151,7 @@ int sc_main(int argc, char **argv) {
 		sys.register_core(&cores[i]->iss);
 		if (opt.intercept_syscalls)
 			cores[i]->iss.sys = &sys;
+		cores[i]->iss.suppress_prompts = opt.suppress_prompts;
 	}
 
 	// setup port mapping

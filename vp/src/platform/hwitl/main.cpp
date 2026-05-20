@@ -56,16 +56,15 @@ public:
 	OptionValue<unsigned long> entry_point;
 
 	HwitlOptions(void) {
-        	// clang-format off
+		add_memory_options(mem_start_addr, mem_size);
+		add_entry_point_option(entry_point);
+	        // clang-format off
 		add_options()
-			("use-real-clint", po::bool_switch(&use_real_clint),"Lock clint to wall-clock time")
-			("memory-start", po::value<unsigned int>(&mem_start_addr),"set memory start address")
-			("memory-size", po::value<unsigned int>(&mem_size), "set memory size")
-			("entry-point", po::value<std::string>(&entry_point.option),"set entry point address (ISS program counter)")
-			("virtual-bus-device",  po::value<std::string>(&virtual_bus_device)->required(),"tty to virtual bus responder")
-			("virtual-bus-baudrate",  po::value<unsigned int>(&virtual_bus_baudrate),"If set, change baudrate of tty device")
-			("virtual-device-start",  po::value<unsigned int>(&virtual_bus_start_addr),"start of virtual peripheral")
-			("virtual-device-end",  po::value<unsigned int>(&virtual_bus_end_addr),"end of virtual peripheral");
+			("use-real-clint", po::bool_switch(&use_real_clint), "lock clint to wall-clock time")
+			("virtual-bus-device",  po::value<std::string>(&virtual_bus_device)->required(), "tty to virtual bus responder")
+			("virtual-bus-baudrate",  po::value<unsigned int>(&virtual_bus_baudrate), "if set, change baudrate of tty device")
+			("virtual-device-start",  po::value<unsigned int>(&virtual_bus_start_addr), "start of virtual peripheral")
+			("virtual-device-end",  po::value<unsigned int>(&virtual_bus_end_addr), "end of virtual peripheral");
         	// clang-format on
 	}
 
@@ -167,6 +166,7 @@ int sc_main(int argc, char **argv) {
 
 	if (opt.intercept_syscalls)
 		core.sys = &sys;
+	core.suppress_prompts = opt.suppress_prompts;
 
 	// address mapping
 	{

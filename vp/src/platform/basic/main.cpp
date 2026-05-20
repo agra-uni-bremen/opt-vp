@@ -79,17 +79,16 @@ public:
 
 	BasicOptions(void) {
         	// clang-format off
+		add_quiet_option(quiet);
+		add_memory_options(mem_start_addr, mem_size);
+		add_use_e_base_isa_option(use_E_base_isa);
+		add_entry_point_option(entry_point);
 		add_options()
-			("quiet", po::bool_switch(&quiet), "do not output register values on exit")
-			("memory-start", po::value<unsigned int>(&mem_start_addr),"set memory start address")
-			("memory-size", po::value<unsigned int>(&mem_size), "set memory size")
-			("use-E-base-isa", po::bool_switch(&use_E_base_isa), "use the E instead of the I integer base ISA")
-			("entry-point", po::value<std::string>(&entry_point.option),"set entry point address (ISS program counter)")
-			("mram-image", po::value<std::string>(&mram_image)->default_value(""),"MRAM image file for persistency")
+			("mram-image", po::value<std::string>(&mram_image)->default_value(""), "MRAM image file for persistence")
 			("mram-image-size", po::value<unsigned int>(&mram_size), "MRAM image size")
-			("flash-device", po::value<std::string>(&flash_device)->default_value(""),"blockdevice for flash emulation")
-			("network-device", po::value<std::string>(&network_device)->default_value(""),"name of the tap network adapter, e.g. /dev/tap6")
-			("signature", po::value<std::string>(&test_signature)->default_value(""),"output filename for the test execution signature");
+			("flash-device", po::value<std::string>(&flash_device)->default_value(""), "block device for flash emulation")
+			("network-device", po::value<std::string>(&network_device)->default_value(""), "name of the tap network adapter, e.g. /dev/tap6")
+			("signature", po::value<std::string>(&test_signature)->default_value(""), "output filename for the test execution signature");
         	// clang-format on
 	};
 
@@ -183,6 +182,7 @@ int sc_main(int argc, char **argv) {
 	core.output_as_dot = opt.output_as_dot;
 	core.output_as_csv = opt.output_as_csv;
 	core.output_as_json = opt.output_as_json;
+	core.suppress_prompts = opt.suppress_prompts;
 
 
 	// address mapping

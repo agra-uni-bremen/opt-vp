@@ -1,6 +1,8 @@
 #ifndef RISCV_VP_OPTIONS_H
 #define RISCV_VP_OPTIONS_H
 
+#include "util/options.h"
+
 #include <boost/program_options.hpp>
 #include <iostream>
 
@@ -20,6 +22,7 @@ public:
 	bool output_as_csv = false;
 	bool output_full_export = false;
 	bool interactive_mode = false;
+	bool suppress_prompts = false;
 
 	bool intercept_syscalls = false;
 	bool error_on_zero_traphandler = false;
@@ -31,6 +34,12 @@ public:
 	bool use_data_dmi = false;
 
 	virtual void printValues(std::ostream& os = std::cout) const;
+
+protected:
+	void add_memory_options(unsigned int &mem_start_addr, unsigned int &mem_size);
+	void add_quiet_option(bool &quiet);
+	void add_use_e_base_isa_option(bool &use_E_base_isa);
+	void add_entry_point_option(OptionValue<unsigned long> &entry_point);
 
 private:
 
