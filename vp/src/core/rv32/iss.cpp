@@ -1795,6 +1795,13 @@ bool ISS::prompt_enable_isa(uint32_t ext_mask) {
 }
 
 bool ISS::prompt_allow_misaligned_access(uint32_t addr, bool isLoad, unsigned alignment) {
+	if (always_trap_misaligned_access) {
+		boost::io::ios_flags_saver ifs(std::cout); //flags saver guarantees restore of std::cout state after scope exit (maybe also use at other prints?)
+		std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
+		          << " access at 0x" << std::hex << addr << std::dec
+		          << " (alignment " << alignment << ")." << std::endl;
+		return false;
+	}
 	if (suppress_prompts)
 		return false;
 
@@ -1804,7 +1811,7 @@ bool ISS::prompt_allow_misaligned_access(uint32_t addr, bool isLoad, unsigned al
 	std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
 	          << " access at 0x" << std::hex << addr << std::dec
 	          << " (alignment " << alignment << ").\n"
-	          << "Permit? \x1b[31m(This is very likely an error!)\x1b[39m [y] once, [a] always, [N] trap (timeout "
+	          << "Permit? \x1b[31m(This is very likely an error!)\x1b[39m [y] once, [a] always allow, [t] always trap, [N] trap (timeout "
 	          << (kPromptTimeoutMs / 1000) << "s): \x1b[0m" << std::flush;
 	
 	pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
@@ -1823,6 +1830,10 @@ bool ISS::prompt_allow_misaligned_access(uint32_t addr, bool isLoad, unsigned al
 		if (c == 'a' || c == 'A') {
 			allow_misaligned_access = true;
 			return true;
+		}
+		if (c == 't' || c == 'T') {
+			always_trap_misaligned_access = true;
+			return false;
 		}
 	}
 	return false;

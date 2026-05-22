@@ -195,6 +195,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	bool interactive_mode = false;
 	bool suppress_prompts = false;
 	bool allow_misaligned_access = false;
+	bool always_trap_misaligned_access = false;
 
 	// last decoded and executed instruction and opcode
 	Instruction instr;
