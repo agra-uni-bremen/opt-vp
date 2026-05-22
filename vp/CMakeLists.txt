@@ -49,3 +49,27 @@ set_tests_properties(gdb integration sw PROPERTIES ENVIRONMENT
 	PATH=$ENV{PATH}:${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_tests_properties(libgdb PROPERTIES ENVIRONMENT
 	RISCV_VP_BASE=${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+# Minimal build target: build a subset of platform binaries in one CMake target
+# so `cmake --build --target minimal` shows a unified progress indicator.
+add_custom_target(minimal
+	DEPENDS
+		riscv-vp
+		linux-vp
+		linux32-vp
+		tiny32-vp
+		tiny64-vp
+		tiny32-mc
+		tiny64-mc
+		microrv32-vp
+	COMMENT "Build minimal set of riscv-vp binaries (no GUI/hwitl/virtual-breadboard/test32)"
+)
+
+add_custom_target(essential
+	DEPENDS
+		riscv-vp
+		linux32-vp
+		tiny32-vp
+		microrv32-vp
+	COMMENT "Build essential set of riscv-vp binaries (no GUI/hwitl/virtual-breadboard/test32)"
+)
