@@ -123,7 +123,14 @@ ISS::ISS(uint32_t hart_id, const char *output_filestr, const char *input_filestr
 	sc_core::sc_time qt = tlm::tlm_global_quantum::instance().get();
 	cycle_time = sc_core::sc_time(10, sc_core::SC_NS);
 
-	output_filename = output_filestr;
+	output_filename_string = output_filestr ? output_filestr : "";
+	if (!output_filename_string.empty() && !is_single_file) {
+		char last = output_filename_string.back();
+		if (last != '/') {
+			output_filename_string.push_back('/');
+		}
+	}
+	output_filename = output_filename_string.c_str();
 	path_hashes = input_hashes.data();
 	input_filename = input_filestr;
 
@@ -2328,8 +2335,8 @@ void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std
 
 void ISS::output_dot(std::streambuf *cout_save){
 	std::ofstream output;
-	if(is_single_file || !output_filename || !output_filename[0]){
-			if(output_filename && output_filename[0]){
+	if (is_single_file || output_filename_string.empty()) {
+			if (!output_filename_string.empty()) {
 				std::cout << "writing to file " << output_filename << std::endl;
 				output = std::ofstream(output_filename);
 				output << "//" << std::time(0) << std::endl;
@@ -2347,7 +2354,7 @@ void ISS::output_dot(std::streambuf *cout_save){
 
 			std::cout << "}" << std::endl; 
 
-			if(output_filename){ //reset cout
+			if (!output_filename_string.empty()) { //reset cout
 				std::cout.rdbuf(cout_save);
 				std::cout << "restored cout" << std::endl;
 			}
@@ -2397,7 +2404,7 @@ void ISS::output_dot(std::streambuf *cout_save){
 			std::cout << std::dec;
 
 
-			if(output_filename){ //reset cout
+			if (!output_filename_string.empty()) { //reset cout
 				std::cout.rdbuf(cout_save);
 				std::cout << "restored cout" << std::endl;
 			}
@@ -2406,7 +2413,7 @@ void ISS::output_dot(std::streambuf *cout_save){
 
 void ISS::output_csv(std::streambuf *cout_save){
 	std::ofstream output;
-	if(!output_filename || !output_filename[0]){
+	if (output_filename_string.empty()) {
 		
 			std::cout << "[ERROR] No output directory set for csv export" << std::endl;
 
@@ -2488,7 +2495,7 @@ void ISS::output_csv(std::streambuf *cout_save){
 
 
 
-			if(output_filename){ //reset cout
+			if (!output_filename_string.empty()) { //reset cout
 				std::cout.rdbuf(cout_save);
 				std::cout << "restored cout" << std::endl;
 			}
@@ -2551,7 +2558,7 @@ void ISS::output_json(std::streambuf *cout_save,
 
 
 		//save or print json
-		if(!output_filename || !output_filename[0]){
+		if (output_filename_string.empty()) {
 			
 			std::cout << top_level_json.dump(JSON_INDENT) << std::endl;
 
@@ -2574,7 +2581,7 @@ void ISS::output_json(std::streambuf *cout_save,
 
 
 
-			if(output_filename){ //reset cout
+			if (!output_filename_string.empty()) { //reset cout
 				std::cout.rdbuf(cout_save);
 				std::cout << "restored cout" << std::endl;
 			}
@@ -2609,7 +2616,7 @@ void ISS::output_full(std::streambuf *cout_save){
 	}
 	printf("Done\n");
 
-			if(output_filename){ //reset cout
+			if (!output_filename_string.empty()) { //reset cout
 				std::cout.rdbuf(cout_save);
 				std::cout << "restored cout" << std::endl;
 			}

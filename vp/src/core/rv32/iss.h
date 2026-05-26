@@ -227,6 +227,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	std::unordered_set<uint32_t> breakpoints;
 	bool debug_mode = false;
 
+	std::string output_filename_string;
 	const char* output_filename;
 	uint64_t *path_hashes;
 	const char* input_filename;
