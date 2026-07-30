@@ -8,6 +8,8 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <sstream>
+#include <iomanip>
 #include <poll.h>
 #include <unistd.h>
 
@@ -2333,6 +2335,102 @@ void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std
 	}
 }
 
+static double similarity_jaccard_positions(const std::vector<Opcode::Mapping>& a,
+				const std::vector<Opcode::Mapping>& b) {
+	const size_t max_len = std::max(a.size(), b.size());
+	if (max_len == 0) {
+		return 1.0;
+	}
+	const size_t min_len = std::min(a.size(), b.size());
+	size_t matches = 0;
+	for (size_t i = 0; i < min_len; ++i) {
+		if (a[i] == b[i]) {
+			++matches;
+		}
+	}
+	return static_cast<double>(matches) / static_cast<double>(max_len);
+}
+
+static size_t levenshtein_distance(const std::vector<Opcode::Mapping>& a,
+				const std::vector<Opcode::Mapping>& b) {
+	const size_t n = a.size();
+	const size_t m = b.size();
+	std::vector<size_t> prev(m + 1, 0);
+	std::vector<size_t> curr(m + 1, 0);
+	for (size_t j = 0; j <= m; ++j) {
+		prev[j] = j;
+	}
+	for (size_t i = 1; i <= n; ++i) {
+		curr[0] = i;
+		for (size_t j = 1; j <= m; ++j) {
+			const size_t cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+			curr[j] = std::min({prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost});
+		}
+		std::swap(prev, curr);
+	}
+	return prev[m];
+}
+
+static double normalized_levenshtein_similarity(const std::vector<Opcode::Mapping>& a,
+				const std::vector<Opcode::Mapping>& b) {
+	const size_t max_len = std::max(a.size(), b.size());
+	if (max_len == 0) {
+		return 1.0;
+	}
+	const size_t dist = levenshtein_distance(a, b);
+	return 1.0 - (static_cast<double>(dist) / static_cast<double>(max_len));
+}
+
+static bool is_similar_sequence(const Path& candidate, const Path& existing, float threshold) {
+	if (threshold <= 0.0f) {
+		return false;
+	}
+	double similarity = 0.0;
+	#if SIMILARITY_ALGORITHM == 1
+	similarity = similarity_jaccard_positions(candidate.opcodes, existing.opcodes);
+	#endif
+	#if SIMILARITY_ALGORITHM == 2
+	similarity = normalized_levenshtein_similarity(candidate.opcodes, existing.opcodes);
+	#endif
+	return (similarity >= threshold);
+}
+
+static std::vector<Path> filter_top_sequences(const std::vector<Path>& sorted_by_score,
+				size_t top_n, float threshold) {
+	std::vector<Path> filtered;
+	if (top_n == 0) {
+		return filtered;
+	}
+	for (const auto& seq : sorted_by_score) {
+		bool too_similar = false;
+		for (const auto& kept : filtered) {
+			if (is_similar_sequence(seq, kept, threshold)) {
+				too_similar = true;
+				break;
+			}
+		}
+		if (!too_similar) {
+			filtered.push_back(seq);
+			if (filtered.size() >= top_n) {
+				break;
+			}
+		}
+	}
+	return filtered;
+}
+
+static std::string opcode_sequence_to_string(const Path& seq) {
+	std::ostringstream stream;
+	for (const auto opcode : seq.opcodes) {
+		const char* opcode_string = "UNKWN";
+		if (opcode < Opcode::mappingStr.size()) {
+			opcode_string = Opcode::mappingStr[opcode];
+		}
+		stream << opcode_string << " -> ";
+	}
+	return stream.str();
+}
+
 void ISS::output_dot(std::streambuf *cout_save){
 	std::ofstream output;
 	if (is_single_file || output_filename_string.empty()) {
@@ -2502,6 +2600,65 @@ void ISS::output_csv(std::streambuf *cout_save){
 		}
 	}
 
+void ISS::output_coverage_csv(const std::vector<Path>& sequences,
+			std::function<float(const ScoreParams)> score_function) {
+	if (!output_coverage_csv_enabled || coverage_csv_file.empty()) {
+		return;
+	}
+
+	std::string output_path = coverage_csv_file;
+	if (!output_path.empty() && output_path[0] != '/' && !output_filename_string.empty()) {
+		output_path = output_filename_string + output_path;
+	}
+
+	std::ofstream output(output_path);
+	if (!output.is_open()) {
+		std::cerr << "[ERROR] Could not open coverage csv output: " << output_path << std::endl;
+		return;
+	}
+
+	output << "sequence;length;weight;true_weight;score;top_pc;top_pc_count;coverage\n";
+
+	for (const auto& seq : sequences) {
+		std::map<uint64_t, int> pc_counts;
+		if (seq.end_of_sequence) {
+			pc_counts = seq.end_of_sequence->get_pc();
+		}
+
+		uint64_t top_pc = 0;
+		int top_pc_count = 0;
+		for (const auto& entry : pc_counts) {
+			if (entry.second > top_pc_count) {
+				top_pc = entry.first;
+				top_pc_count = entry.second;
+			}
+		}
+
+		uint64_t true_weight = 0;
+		if (seq.end_of_sequence) {
+			true_weight = seq.end_of_sequence->true_weight;
+		}
+		double coverage = 0.0;
+		if (csrs.instret.reg > 0) {
+			coverage = (static_cast<double>(seq.length) * static_cast<double>(true_weight)) /
+				static_cast<double>(csrs.instret.reg);
+		}
+
+		std::ostringstream pc_stream;
+		pc_stream << "0x" << std::hex << top_pc;
+
+		output << "\"" << opcode_sequence_to_string(seq) << "\";"
+				<< seq.length << ";"
+				<< seq.minimum_weight << ";"
+				<< true_weight << ";"
+				<< seq.get_score(score_function) << ";"
+				<< pc_stream.str() << ";"
+				<< top_pc_count << ";"
+				<< coverage
+				<< "\n";
+	}
+}
+
 void ISS::output_json(std::streambuf *cout_save, 
 		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
 		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
@@ -2660,8 +2817,8 @@ void ISS::show() {
 		return score;
 	};
 	for (InstructionNodeR& tree : instruction_trees){
-		Path p = tree.extend_path({1, 0, 1.0, i, -1, Opcode::Mapping::UNDEF, sf});
-		discovered_sequences.push_back(p);
+		std::vector<Path> top_paths = tree.extend_top_paths({1, 0, 1.0, i, -1, Opcode::Mapping::UNDEF, sf}, coverage_top_n);
+		discovered_sequences.insert(discovered_sequences.end(), top_paths.begin(), top_paths.end());
 		i++;
 		printf(".");
 	}
@@ -2673,6 +2830,31 @@ void ISS::show() {
 	[sf](Path a, Path b) -> bool{
 		return a.get_score(sf)<b.get_score(sf);
 	});
+
+	{
+		std::vector<Path> sequences_sorted = discovered_sequences;
+		std::sort(sequences_sorted.begin(), sequences_sorted.end(),
+			[sf](const Path& a, const Path& b) -> bool {
+				return a.get_score(sf) > b.get_score(sf);
+			});
+		printf("\n ----------------------------\n| Best Sequences (Coverage) |\n ----------------------------\n");
+		for (size_t idx = 0; idx < std::min<size_t>(4, sequences_sorted.size()); ++idx) {
+			sequences_sorted[idx].show();
+		}
+	}
+
+	if (output_coverage_csv_enabled) {
+		std::vector<Path> sequences_sorted = discovered_sequences;
+		std::sort(sequences_sorted.begin(), sequences_sorted.end(),
+			[sf](const Path& a, const Path& b) -> bool {
+				return a.get_score(sf) > b.get_score(sf);
+			});
+		std::vector<Path> filtered = filter_top_sequences(
+			sequences_sorted,
+			static_cast<size_t>(coverage_top_n),
+			coverage_similarity_threshold);
+		output_coverage_csv(filtered, sf);
+	}
 
 	std::vector<std::vector<PathNode>> discovered_sequences_node_list;
 	std::vector<std::vector<BranchingPoint>> discovered_variant_starting_points;
@@ -2693,7 +2875,7 @@ void ISS::show() {
 		std::ofstream csv_out(csv_stats, std::ios::app);
 		csv_out.seekp(0, std::ios::end);
 		if (csv_out.tellp() == 0) {
-			csv_out << "Opcodes;Length;Weight;Score;Hash\n";
+			csv_out << "Opcodes;Length;Weight;Score;Hash;Coverage\n";
 		}else{
 			csv_out.seekp(0, std::ios::end); // Move to the end of the file
 			csv_out << "\n"; // Add a newline to separate from previous content
@@ -2750,7 +2932,8 @@ void ISS::show() {
 		
 		printf("-------------------------------------------\n");
 		//print discovered sequences
-		p.show();	
+		//print top sequence for each tree
+		//p.show();	//This line actualy prints the formatted sequences 
 		// printf("Stats:\n");
 		// p.to_csv_stats();
 		//print stats of sequence to file as csv
@@ -2758,7 +2941,7 @@ void ISS::show() {
 		{
 			std::ofstream csv_out(csv_stats, std::ios::app);
 			#ifdef output_stats
-			p.to_csv_stats(csv_out);
+			p.to_csv_stats(csv_out, csrs.instret.reg);
 			#endif
 		}
 

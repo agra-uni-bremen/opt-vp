@@ -10,8 +10,9 @@
 
 #include "lib/json/single_include/nlohmann/json.hpp"
 
-#define INSTRUCTION_TREE_DEPTH 20
+#define INSTRUCTION_TREE_DEPTH 6
 #define JSON_INDENT -1
+#define SIMILARITY_ALGORITHM 1 //1 for jaccard, 2 for levenshtein
 #define MAX_VARIANTS 3
 #define SF_BATCH_SIZE 3
 #define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
@@ -168,7 +169,7 @@ struct Path
 	
 	//double score = 0; //TODO should this be saved here? How should we handle initialization?
 
-	float get_score(std::function <float(ScoreParams)> score_function){
+	float get_score(std::function <float(ScoreParams)> score_function) const {
 		uint32_t num_children = 0; //TODO end_of_sequence test for type and count children  
 		uint32_t inputs = 0; //TODO
 		uint32_t outputs = 0; //TODO 
@@ -184,14 +185,14 @@ struct Path
 		// length * minimum_weight * score_multiplier 
 		// 		+ minimum_weight * score_bonus; //length * minimum_weight;
 	}
-	float get_normalized_score(){
+	float get_normalized_score() const {
 		return length / (1.0 + inverse_dependency_score);
 	}
 
-	void show(){
+	void show() const {
 		show("");
 	}
-	void show(const char* prefix){
+	void show(const char* prefix) const {
 		auto sf = [](const ScoreParams p) {
 			float score = (p.length * p.weight) * p.score_multiplier 
 				+ p.weight * p.score_bonus; //length * minimum_weight;
@@ -200,7 +201,7 @@ struct Path
 		show(prefix, sf);
 	}
 
-	void show(const char* prefix, std::function <float(const ScoreParams)> score_function){
+	void show(const char* prefix, std::function <float(const ScoreParams)> score_function) const {
 		std::cout << prefix << "[Sequence]\n";
 		std::cout << prefix << "Length: " << length << "\n";
 		std::cout << prefix << "Weight: " << minimum_weight << "\n";
@@ -221,32 +222,9 @@ struct Path
 
 
 		std::cout << prefix << "Last Path Hash: " << path_hashes.back() << std::endl;
-		// std::cout << "<Path Hashes>\n";
-		// for (auto &&hash : path_hashes)	
-		// {
-		// 	std::cout << hash << " --> ";
-
-		// }
-		// std::cout << "\n\n";
 	}
 
-	//appends the sequence as a csv list to file specified in output_filename
-	// opcode -> opcode -> opcode ... ; length ; weight; score; hash
-	void to_csv_stats(std::ostream& output_file){
-    for (auto &&opcode : opcodes)
-    {
-        const char* opcode_string = "UNKWN ";
-		output_file << "\"";
-        if(opcode < Opcode::mappingStr.size()){
-            opcode_string = Opcode::mappingStr[opcode];
-        }
-        output_file << opcode_string << " -> ";
-    }
-	output_file << "\"";
-    output_file << ";" << length << ";" << minimum_weight 
-        << ";" << get_score([](const ScoreParams p) { return p.length * p.weight; }) 
-        << ";" << path_hashes.back() << "\n";
-}
+	void to_csv_stats(std::ostream& output_file, uint64_t total_instructions) const;
 };
 
 
@@ -850,6 +828,17 @@ class InstructionNode{
 
 		}
 
+		virtual std::vector<Path> extend_top_paths(const PathExtensionParams& p, size_t top_k){
+			if (top_k == 0)
+				return {};
+
+			Path path = extend_path(p);
+			if (path.length == 0)
+				return {};
+
+			return {path};
+		}
+
 		//might happen if best sequence length == Max Tree Depth
 		virtual std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function){
 			printf("Warning: Forcing path extension of non R Node\nConsider increasing the maximum tree depth\n");
@@ -920,6 +909,7 @@ class InstructionNodeR : virtual public InstructionNode{
 		
 		//finds the most promising optimization sequence for this tree by evaluating every possible sequence
 		Path extend_path(const PathExtensionParams& p) override;
+		std::vector<Path> extend_top_paths(const PathExtensionParams& p, size_t top_k) override;
 		//extend existing path beyond its original endpoint
 		//expects an existing path + first Node new path that should be extended
 		//handles possible branch instructions and the calls extend_path() 
@@ -954,6 +944,30 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 	std::map<uint64_t, int> get_pc() override;
 	NODE_TYPE get_node_type() override;
 };
+
+inline void Path::to_csv_stats(std::ostream& output_file, uint64_t total_instructions) const {
+	for (auto&& opcode : opcodes) {
+		const char* opcode_string = "UNKWN ";
+		output_file << "\"";
+		if (opcode < Opcode::mappingStr.size()) {
+			opcode_string = Opcode::mappingStr[opcode];
+		}
+		output_file << opcode_string << " -> ";
+	}
+	output_file << "\"";
+	uint64_t true_weight = 0;
+	if (end_of_sequence) {
+		true_weight = end_of_sequence->true_weight;
+	}
+	double coverage = 0.0;
+	if (total_instructions > 0) {
+		coverage = (static_cast<double>(length) * static_cast<double>(true_weight)) /
+			static_cast<double>(total_instructions);
+	}
+	output_file << ";" << length << ";" << minimum_weight
+		<< ";" << get_score([](const ScoreParams p) { return p.length * p.weight; })
+		<< ";" << path_hashes.back() << ";" << coverage << "\n";
+}
 
 class MemoryNode{
 	public: 

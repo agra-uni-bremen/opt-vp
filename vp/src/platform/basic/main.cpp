@@ -183,6 +183,10 @@ int sc_main(int argc, char **argv) {
 	core.output_as_csv = opt.output_as_csv;
 	core.output_as_json = opt.output_as_json;
 	core.suppress_prompts = opt.suppress_prompts;
+	core.coverage_csv_file = opt.coverage_csv_file;
+	core.coverage_top_n = opt.top_n;
+	core.coverage_similarity_threshold = opt.similarity_threshold;
+	core.output_coverage_csv_enabled = !opt.coverage_csv_file.empty();
 
 
 	// address mapping

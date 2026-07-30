@@ -777,6 +777,71 @@ nlohmann::ordered_json InstructionNodeR::to_json(){
 	return base_class_json;
 }
 
+namespace {
+	static Path build_node_path(InstructionNode& node, const PathExtensionParams& p) {
+		Path path;
+		path.length = p.length;
+		path.minimum_weight = node.weight;
+		path.score_bonus = p.score_bonus + node.get_score_bonus();
+		path.score_multiplier = p.score_multiplier * node.get_score_multiplier();
+		path.inverse_dependency_score = node.get_inv_dep_score();
+		path.opcodes.push_back(node.instruction);
+		path.path_hashes.push_back(node.subtree_hash);
+		path.end_of_sequence = &node;
+		return path;
+	}
+
+	static void prepend_node(Path& path, InstructionNode& node) {
+		path.opcodes.insert(path.opcodes.begin(), node.instruction);
+		path.path_hashes.insert(path.path_hashes.begin(), node.subtree_hash);
+		path.inverse_dependency_score += node.get_inv_dep_score();
+		path.minimum_weight = std::min(path.minimum_weight, node.weight);
+	}
+
+	static std::vector<Path> sort_and_trim_paths(std::vector<Path> paths,
+											 const std::function<float(ScoreParams)>& score_function,
+											 size_t top_k) {
+		if (top_k == 0)
+			return {};
+
+		std::sort(paths.begin(), paths.end(),
+			[&score_function](const Path& a, const Path& b) -> bool {
+				return a.get_score(score_function) > b.get_score(score_function);
+			});
+
+		if (paths.size() > top_k)
+			paths.resize(top_k);
+
+		return paths;
+	}
+}
+
+std::vector<Path> InstructionNodeR::extend_top_paths(const PathExtensionParams& p, size_t top_k){
+	if (top_k == 0)
+		return {};
+
+	std::vector<Path> candidates;
+	candidates.push_back(build_node_path(*this, p));
+
+	for (InstructionNode* child : children) {
+		auto child_candidates = child->extend_top_paths({p.length + 1,
+				p.score_bonus + get_score_bonus(),
+				p.score_multiplier * get_score_multiplier(),
+				p.tree_id,
+				p.force_extension_depth,
+				p.force_instruction,
+				p.score_function},
+			top_k);
+
+		for (auto child_path : child_candidates) {
+			prepend_node(child_path, *this);
+			candidates.push_back(std::move(child_path));
+		}
+	}
+
+	return sort_and_trim_paths(std::move(candidates), p.score_function, top_k);
+}
+
 //called recursively for children
 Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 	

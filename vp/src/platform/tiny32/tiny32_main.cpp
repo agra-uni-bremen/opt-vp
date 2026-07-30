@@ -99,6 +99,10 @@ int sc_main(int argc, char **argv) {
 	core.output_full_export = opt.output_full_export;
 	core.interactive_mode = opt.interactive_mode;
 	core.suppress_prompts = opt.suppress_prompts;
+	core.coverage_csv_file = opt.coverage_csv_file;
+	core.coverage_top_n = opt.top_n;
+	core.coverage_similarity_threshold = opt.similarity_threshold;
+	core.output_coverage_csv_enabled = !opt.coverage_csv_file.empty();
 
 	// setup port mapping
 	bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

@@ -14,6 +14,9 @@ public:
 
 	std::string input_program;
 	std::string output_file;
+	std::string coverage_csv_file;
+	unsigned int top_n = 10;
+	float similarity_threshold = 0.2f;
 
 	std::vector<uint64_t> input_hash_list;
 	float reduce_graph_output = 0.0;

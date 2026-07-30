@@ -192,6 +192,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	bool output_as_csv = false;
 	bool output_as_json = false;
 	bool output_full_export = false;
+	bool output_coverage_csv_enabled = false;
 	bool interactive_mode = false;
 	bool suppress_prompts = false;
 	bool allow_misaligned_access = false;
@@ -229,6 +230,9 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	std::string output_filename_string;
 	const char* output_filename;
+	std::string coverage_csv_file;
+	unsigned int coverage_top_n = 10;
+	float coverage_similarity_threshold = 0.2f;
 	uint64_t *path_hashes;
 	const char* input_filename;
 
@@ -395,6 +399,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	void output_dot(std::streambuf *cout_save);
 	void output_csv(std::streambuf *cout_save);
+	void output_coverage_csv(const std::vector<Path>& sequences,
+			std::function<float(const ScoreParams)> score_function);
 	void output_json(std::streambuf *cout_save, 
 		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
 		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
