@@ -57,12 +57,9 @@ int sc_main(int argc, char **argv) {
 	tlm::tlm_global_quantum::instance().set(sc_core::sc_time(opt.tlm_global_quantum, sc_core::SC_NS));
 
 	ISS core0(0);
-	MMU mmu0(core0);
 	ISS core1(1);
-	MMU mmu1(core1);
-
-	CombinedMemoryInterface core0_mem_if("MemoryInterface0", core0, mmu0);
-	CombinedMemoryInterface core1_mem_if("MemoryInterface1", core1, mmu1);
+	CombinedMemoryInterface core0_mem_if("MemoryInterface0", core0);
+	CombinedMemoryInterface core1_mem_if("MemoryInterface1", core1);
 
 	SimpleMemory mem("SimpleMemory", opt.mem_size);
 	ELFLoader loader(opt.input_program.c_str());
@@ -93,6 +90,8 @@ int sc_main(int argc, char **argv) {
 		core0.sys = &sys;
 		core1.sys = &sys;
 	}
+	core0.error_on_zero_traphandler = opt.error_on_zero_traphandler;
+	core1.error_on_zero_traphandler = opt.error_on_zero_traphandler;
 	core0.suppress_prompts = opt.suppress_prompts;
 	core1.suppress_prompts = opt.suppress_prompts;
 

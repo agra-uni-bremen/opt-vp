@@ -207,6 +207,21 @@ int sc_main(int argc, char **argv) {
 		bus.ports[it++] = new PortMapping(opt.sys_start_addr, opt.sys_end_addr);
 	}
 
+	// register peripheral address ranges with the core for system-level access tracking
+	// (excludes RAM, which keeps its existing HEAP/STACK/FRAME classification)
+	core.register_peripheral_region("CLINT", opt.clint_start_addr, opt.clint_end_addr);
+	core.register_peripheral_region("PLIC", opt.plic_start_addr, opt.plic_end_addr);
+	core.register_peripheral_region("Terminal", opt.term_start_addr, opt.term_end_addr);
+	core.register_peripheral_region("UART", opt.uart_start_addr, opt.uart_end_addr);
+	core.register_peripheral_region("Sensor", opt.sensor_start_addr, opt.sensor_end_addr);
+	core.register_peripheral_region("DMA", opt.dma_start_addr, opt.dma_end_addr);
+	core.register_peripheral_region("Sensor2", opt.sensor2_start_addr, opt.sensor2_end_addr);
+	core.register_peripheral_region("MRAM", opt.mram_start_addr, opt.mram_end_addr);
+	core.register_peripheral_region("Flash", opt.flash_start_addr, opt.flash_end_addr);
+	core.register_peripheral_region("Ethernet", opt.ethernet_start_addr, opt.ethernet_end_addr);
+	core.register_peripheral_region("Display", opt.display_start_addr, opt.display_end_addr);
+	core.register_peripheral_region("Syscall", opt.sys_start_addr, opt.sys_end_addr);
+
 	// connect TLM sockets
 	iss_mem_if.isock.bind(bus.tsocks[0]);
 	dbg_if.isock.bind(bus.tsocks[2]);

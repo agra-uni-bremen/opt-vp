@@ -10,24 +10,24 @@ namespace rv64 {
 struct InstrMemoryProxy : public instr_memory_if {
 	MemoryDMI dmi;
 
-	ISS &core;
+	// ISS &core;
 	tlm_utils::tlm_quantumkeeper &quantum_keeper;
 	sc_core::sc_time clock_cycle = sc_core::sc_time(10, sc_core::SC_NS);
 	sc_core::sc_time access_delay = clock_cycle * 2;
 
-	InstrMemoryProxy(const MemoryDMI &dmi, ISS &owner) : dmi(dmi), core(owner), quantum_keeper(owner.quantum_keeper) {}
+	InstrMemoryProxy(const MemoryDMI &dmi, ISS &owner) : dmi(dmi), quantum_keeper(owner.quantum_keeper) {}
 
 	virtual uint32_t load_instr(uint64_t pc) override {
-		assert((core.csrs.satp.fields.mode == SATP_MODE_BARE) && "InstrMemoryProxy does not support virtual memory");
+		// assert((core.csrs.satp.fields.mode == SATP_MODE_BARE) && "InstrMemoryProxy does not support virtual memory");
 		quantum_keeper.inc(access_delay);
-		return *(dmi.get_mem_ptr_to_global_addr<uint32_t>(pc));
+		return dmi.load<uint64_t>(pc); //TODO 32 or 64 bit?
 	}
 };
 
 struct CombinedMemoryInterface : public sc_core::sc_module,
                                  public instr_memory_if,
                                  public data_memory_if,
-                                 public mmu_memory_if {
+                                 public mmu_memory_if  {
 	ISS &iss;
 	std::shared_ptr<bus_lock_if> bus_lock;
 	uint64_t lr_addr = 0;
@@ -40,13 +40,16 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 	sc_core::sc_time dmi_access_delay = clock_cycle * 4;
 	std::vector<MemoryDMI> dmi_ranges;
 
-	MMU &mmu;
+    MMU *mmu;
 
-	CombinedMemoryInterface(sc_core::sc_module_name, ISS &owner, MMU &mmu)
-	    : iss(owner), quantum_keeper(iss.quantum_keeper), mmu(mmu) {}
+	CombinedMemoryInterface(sc_core::sc_module_name, ISS &owner, MMU *mmu = nullptr)
+	    : iss(owner), quantum_keeper(iss.quantum_keeper), mmu(mmu) {
+	}
 
 	uint64_t v2p(uint64_t vaddr, MemoryAccessType type) override {
-		return mmu.translate_virtual_to_physical_addr(vaddr, type);
+	    if (mmu == nullptr)
+	        return vaddr;
+        return mmu->translate_virtual_to_physical_addr(vaddr, type);
 	}
 
 	inline void _do_transaction(tlm::tlm_command cmd, uint64_t addr, uint8_t *data, unsigned num_bytes) {
@@ -65,8 +68,8 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 		quantum_keeper.set(local_delay);
 
 		if (trans.is_response_error()) {
-			if (iss.trace)
-				std::cout << "WARNING: core memory transaction failed for address 0x" << std::hex << addr << std::dec << " -> raise trap" << std::endl;
+			if (iss.trace || iss.sys)	// if iss has syscall interface, it likely has no traphandler for this
+				std::cout << "WARNING: core memory transaction failed for address 0x" << std::hex << addr << std::dec << std::endl;
 			if (cmd == tlm::TLM_READ_COMMAND)
 				raise_trap(EXC_LOAD_PAGE_FAULT, addr);
 			else if (cmd == tlm::TLM_WRITE_COMMAND)
@@ -85,9 +88,7 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 		for (auto &e : dmi_ranges) {
 			if (e.contains(addr)) {
 				quantum_keeper.inc(dmi_access_delay);
-
-				T ans = *(e.get_mem_ptr_to_global_addr<T>(addr));
-				return ans;
+				return e.load<T>(addr);
 			}
 		}
 
@@ -104,8 +105,9 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 		for (auto &e : dmi_ranges) {
 			if (e.contains(addr)) {
 				quantum_keeper.inc(dmi_access_delay);
-
-				*(e.get_mem_ptr_to_global_addr<T>(addr)) = value;
+				e.store(addr, value);
+				//TODO check why the line below was used instead
+				// *(e.get_mem_ptr_to_global_addr<T>(addr)) = value;
 				done = true;
 			}
 		}
@@ -114,6 +116,7 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 			_do_transaction(tlm::TLM_WRITE_COMMAND, addr, (uint8_t *)&value, sizeof(T));
 		atomic_unlock();
 	}
+
 
 	template <typename T>
 	inline T _load_data(uint64_t addr) {
@@ -136,7 +139,7 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 	}
 
 	void flush_tlb() override {
-		mmu.flush_tlb();
+        mmu->flush_tlb();
 	}
 
 	uint32_t load_instr(uint64_t addr) override {
@@ -209,33 +212,34 @@ struct CombinedMemoryInterface : public sc_core::sc_module,
 		_store_data(addr, value);
 	}
 
-	int64_t atomic_load_word(uint64_t addr) override {
+	//TODO check against rv32 behavior again
+	virtual int64_t atomic_load_word(uint64_t addr) override {
 		return _atomic_load_data<int32_t>(addr);
 	}
-	void atomic_store_word(uint64_t addr, uint32_t value) override {
+	virtual void atomic_store_word(uint64_t addr, uint32_t value) override {
 		_atomic_store_data(addr, value);
 	}
-	int64_t atomic_load_reserved_word(uint64_t addr) override {
+	virtual int64_t atomic_load_reserved_word(uint64_t addr) override {
 		return _atomic_load_reserved_data<int32_t>(addr);
 	}
-	bool atomic_store_conditional_word(uint64_t addr, uint32_t value) override {
+	virtual bool atomic_store_conditional_word(uint64_t addr, uint32_t value) override {
 		return _atomic_store_conditional_data(addr, value);
 	}
 
-	int64_t atomic_load_double(uint64_t addr) override {
+	virtual int64_t atomic_load_double(uint64_t addr) override {
 		return _atomic_load_data<int64_t>(addr);
 	}
-	void atomic_store_double(uint64_t addr, uint64_t value) override {
+	virtual void atomic_store_double(uint64_t addr, uint64_t value) override {
 		_atomic_store_data(addr, value);
 	}
-	int64_t atomic_load_reserved_double(uint64_t addr) override {
+	virtual int64_t atomic_load_reserved_double(uint64_t addr) override {
 		return _atomic_load_reserved_data<int64_t>(addr);
 	}
-	bool atomic_store_conditional_double(uint64_t addr, uint64_t value) override {
+	virtual bool atomic_store_conditional_double(uint64_t addr, uint64_t value) override {
 		return _atomic_store_conditional_data(addr, value);
 	}
 
-	void atomic_unlock() override {
+	virtual void atomic_unlock() override {
 		bus_lock->unlock(iss.get_hart_id());
 	}
 };

@@ -64,10 +64,17 @@ struct csr_misa {
 	};
 
 	void init() {
-		fields.extensions = I | M | A | F | D | C | N | U | S;  // IMACFD + NUS
-		fields.mxl = 2;                                         // RV64
+		fields.extensions = I | M | A | F | D | C | N | U | S;  // IMAFDC + NUS
+		fields.wiri = 0; // check again if this can be compied from rv32
+		fields.mxl = 2;  // RV64
 	}
 };
+
+constexpr unsigned M_ISA_EXT = csr_misa::M;
+constexpr unsigned A_ISA_EXT = csr_misa::A;
+constexpr unsigned F_ISA_EXT = csr_misa::F;
+constexpr unsigned D_ISA_EXT = csr_misa::D;
+constexpr unsigned C_ISA_EXT = csr_misa::C;
 
 struct csr_mvendorid {
 	union {

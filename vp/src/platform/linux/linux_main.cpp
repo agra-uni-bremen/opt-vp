@@ -87,7 +87,7 @@ class Core {
 	InstrMemoryProxy imemif;
 
 	Core(unsigned int id, MemoryDMI dmi)
-	    : iss(id), mmu(iss), memif(("MemoryInterface" + std::to_string(id)).c_str(), iss, mmu), imemif(dmi, iss) {
+	    : iss(id), mmu(iss), memif(("MemoryInterface" + std::to_string(id)).c_str(), iss, &mmu), imemif(dmi, iss) {
 		return;
 	}
 
@@ -197,6 +197,10 @@ int sc_main(int argc, char **argv) {
 		// emulate RISC-V core boot loader
 		cores[i]->iss.regs[RegFile::a0] = cores[i]->iss.get_hart_id();
 		cores[i]->iss.regs[RegFile::a1] = opt.dtb_rom_start_addr;
+
+		// configure supported instructions
+		cores[i]->iss.csrs.misa.fields.extensions |= cores[i]->iss.csrs.misa.M | cores[i]->iss.csrs.misa.A |
+			cores[i]->iss.csrs.misa.F | cores[i]->iss.csrs.misa.D;
 	}
 
 	// OpenSBI boots all harts except hart 0 by default.

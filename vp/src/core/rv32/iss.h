@@ -205,23 +205,44 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	//one entry for each different instruction, representing the root node
 	std::list<InstructionNodeR> instruction_trees; //TODO maybe allow derived classes if their info becomes necessary
 	//last_executed instructions as a ring buffer
-	#ifdef USE_INDIVIDUAL_ARRAYS
-	std::array<Opcode::Mapping, INSTRUCTION_TREE_DEPTH> last_executed_instructions;
-	std::array<std::tuple<uint16_t,uint16_t,uint16_t>, INSTRUCTION_TREE_DEPTH> last_registers; //-1 if not applicable TODO add rs3 for R4 type fused multiply
-	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_executed_pc;
-	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_memory_read; //fill with 0 if none read
-	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_memory_written;
+	// #ifdef USE_INDIVIDUAL_ARRAYS
+	// std::array<Opcode::Mapping, INSTRUCTION_TREE_DEPTH> last_executed_instructions;
+	// std::array<std::tuple<uint16_t,uint16_t,uint16_t>, INSTRUCTION_TREE_DEPTH> last_registers; //-1 if not applicable TODO add rs3 for R4 type fused multiply
+	// std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_executed_pc;
+	// std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_memory_read; //fill with 0 if none read
+	// std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_memory_written;
 
-	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_cycles;
-	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_powermodes;
-	#else
+	// std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_cycles;
+	// std::array<uint64_t, INSTRUCTION_TREE_DEPTH> last_powermodes;
+	// #else
 	std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps; 
-	#endif
+	// #endif
 
 	uint64_t prev_cycles = 0;
 
 	std::map<uint64_t, std::tuple<uint64_t,uint64_t>> memory_access_map; //map mem -> write_access | load_access
 	std::tuple<uint64_t, AccessType> last_memory_access = {-1, AccessType::NONE}; //address, is_store = 2 is_load = 1 no_memory_access=0
+
+	//system-level peripheral address ranges, registered by the platform (e.g. main.cpp) via register_peripheral_region
+	struct PeripheralRegion {
+		std::string name;
+		uint64_t start;
+		uint64_t end;
+	};
+	std::vector<PeripheralRegion> peripheral_regions;
+	const char* last_memory_peripheral = nullptr; //peripheral name hit by the most recent memory access, if any
+
+	void register_peripheral_region(const std::string& name, uint64_t start, uint64_t end) {
+		peripheral_regions.push_back({name, start, end});
+	}
+
+	const char* resolve_peripheral(uint64_t addr) const {
+		for (const auto& region : peripheral_regions) {
+			if (addr >= region.start && addr <= region.end)
+				return region.name.c_str();
+		}
+		return nullptr;
+	}
 
 	uint8_t ring_buffer_index =  0;
 	CoreExecStatus status = CoreExecStatus::Runnable;
@@ -299,7 +320,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	void fp_setup_rm();
 	void fp_require_not_off();
 	bool prompt_enable_isa(uint32_t ext_mask);
-	bool prompt_allow_misaligned_access(uint32_t addr, bool isLoad, unsigned alignment);
+	bool prompt_allow_misaligned_access(uint64_t addr, bool isLoad, unsigned alignment);
 
 	uint32_t get_csr_value(uint32_t addr);
 	void set_csr_value(uint32_t addr, uint32_t value);
@@ -336,11 +357,13 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 		//update entry and invalidate last load
 		memory_access_map[address] = {apc, 0};
 		last_memory_access = {address, AccessType::STORE};
+		last_memory_peripheral = resolve_peripheral(address);
 	}
 	inline void log_memory_read(uint64_t address, uint64_t apc){
 		//update entry and keep last write
 		std::get<1>(memory_access_map[address]) = apc;
 		last_memory_access = {address, AccessType::LOAD};
+		last_memory_peripheral = resolve_peripheral(address);
 	}
 
 	inline void execute_amo(Instruction &instr, std::function<int32_t(int32_t, int32_t)> operation) {

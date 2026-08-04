@@ -85,6 +85,7 @@ struct ExecutionInfo {
 	AccessType last_memory_access_type;
 	uint64_t last_stack_pointer;
 	uint64_t last_frame_pointer;
+	const char* last_peripheral_name = nullptr;
 
 	int32_t last_parameter;
 	
@@ -114,6 +115,7 @@ struct StepInsertInfo {
 	uint64_t frame_pointer;
 	// Parameter tracking fields
 	int32_t parameter; // currently used for: Shift
+	const char* peripheral_name = nullptr;
 };
 
 struct ScoreParams {
@@ -151,6 +153,7 @@ struct StepUpdateInfo {
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
 	int32_t parameter; // currently used for: Shift and Branch Targets
+	const char* peripheral_name = nullptr;
 };
 
 class InstructionNode;
@@ -246,6 +249,9 @@ struct PathNode {
 	std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
 	std::set<int8_t> anti_dependencies;
 	std::set<int8_t> output_dependencies;
+
+	//additional per-node info attached by specialized node types (e.g. memory/peripheral access info), merged into to_json() output
+	nlohmann::json extra_fields = nlohmann::json::object();
 
 	//also save registers?
 
@@ -976,6 +982,8 @@ class MemoryNode{
 		std::unordered_map<uint64_t, std::unordered_map<uint64_t, Opcode::MemoryRegion>> memory_accesses;
 		uint64_t last_access = 0;
 		uint64_t access_offset_sum = 0;
+		std::unordered_map<uint64_t, std::string> peripheral_by_address; //address -> peripheral name, for accesses that hit a registered peripheral region
+		std::unordered_map<std::string, uint64_t> peripheral_access_counts; //peripheral name -> number of accesses
 
 		MemoryNode(){};
 		MemoryNode(bool is_store_instruction);
@@ -985,11 +993,13 @@ class MemoryNode{
 			json["LS"] = is_store;
 			json["Accesses"] = memory_accesses;
 			json["OffsetSum"] = access_offset_sum;
+			json["Peripherals"] = peripheral_by_address;
+			json["PeripheralAccessCounts"] = peripheral_access_counts;
 			return json;
 		};
 
 		void register_access(uint64_t pc, uint64_t address, AccessType access_type,uint64_t prev_access, 
-								uint64_t stackpointer, uint64_t framepointer);
+								uint64_t stackpointer, uint64_t framepointer, const char* peripheral_name = nullptr);
 
 };
 
@@ -1036,6 +1046,7 @@ class InstructionNodeMemory : public InstructionNodeR, virtual public MemoryNode
 		base_class_json.update(additional_fields);
 		return base_class_json;
 	}
+	std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override;
 	NODE_TYPE get_node_type() override;
 };
 
@@ -1061,6 +1072,7 @@ class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public Mem
 		base_class_json.update(additional_fields);
 		return base_class_json;
 	}
+	std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override;
 	NODE_TYPE get_node_type() override;
 };
 

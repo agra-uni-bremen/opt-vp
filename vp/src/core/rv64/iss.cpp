@@ -1,13 +1,43 @@
 #include "iss.h"
+#include "trace_analysis.h"
 
 // to save *cout* format setting, see *ISS::show*
-#include <boost/format.hpp>
+// #include <boost/format.hpp>
 #include <boost/io/ios_state.hpp>
 // for safe down-cast
 #include <boost/lexical_cast.hpp>
 
+#include <iostream>
+#include <fstream>
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
+#include <poll.h>
+#include <unistd.h>
+
+#include <dlfcn.h>
+#include <cstdlib>
+
+#include <chrono>
+
 using namespace rv64;
 
+static const char *isa_extension_name(uint32_t ext_mask) {
+	switch (ext_mask) {
+		case M_ISA_EXT:
+			return "M";
+		case A_ISA_EXT:
+			return "A";
+		case F_ISA_EXT:
+			return "F";
+		case D_ISA_EXT:
+			return "D";
+		case C_ISA_EXT:
+			return "C";
+		default:
+			return "unknown";
+	}
+}
 // GCC and clang support these types on x64 machines
 // perhaps use boost::multiprecision::int128_t instead
 // see: https://stackoverflow.com/questions/18439520/is-there-a-128-bit-integer-in-c
@@ -15,6 +45,16 @@ typedef __int128_t int128_t;
 typedef __uint128_t uint128_t;
 
 #define RAISE_ILLEGAL_INSTRUCTION() raise_trap(EXC_ILLEGAL_INSTR, instr.data());
+
+/* #define REQUIRE_ISA(X)          \
+//     if (!(csrs.misa.reg & X))   \
+//         RAISE_ILLEGAL_INSTRUCTION()*/
+
+#define REQUIRE_ISA(X)                                       \
+		if (!(csrs.misa.reg & (X))) {                           \
+			if (!prompt_enable_isa((X)))                          \
+				RAISE_ILLEGAL_INSTRUCTION();                       \
+		}                                                      \
 
 #define RD instr.rd()
 #define RS1 instr.rs1()
@@ -89,12 +129,23 @@ void RegFile::show() {
 	}
 }
 
-ISS::ISS(uint64_t hart_id) : systemc_name("Core-" + std::to_string(hart_id)) {
+ISS::ISS(uint64_t hart_id, const char *output_filestr, const char *input_filestr,std::vector<uint64_t> input_hashes, bool use_E_base_isa) : systemc_name("Core-" + std::to_string(hart_id)) {
 	csrs.mhartid.reg = hart_id;
 	op = Opcode::Mapping::UNDEF;
 
 	sc_core::sc_time qt = tlm::tlm_global_quantum::instance().get();
 	cycle_time = sc_core::sc_time(10, sc_core::SC_NS);
+
+	output_filename_string = output_filestr ? output_filestr : "";
+	if (!output_filename_string.empty() && !is_single_file) {
+		char last = output_filename_string.back();
+		if (last != '/') {
+			output_filename_string.push_back('/');
+		}
+	}
+	output_filename = output_filename_string.c_str();
+	path_hashes = input_hashes.data();
+	input_filename = input_filestr;
 
 	assert(qt >= cycle_time);
 	assert(qt % cycle_time == sc_core::SC_ZERO_TIME);
@@ -120,16 +171,21 @@ ISS::ISS(uint64_t hart_id) : systemc_name("Core-" + std::to_string(hart_id)) {
 	instr_cycles[Opcode::DIVU] = mul_div_cycles;
 	instr_cycles[Opcode::REM] = mul_div_cycles;
 	instr_cycles[Opcode::REMU] = mul_div_cycles;
+	op = Opcode::UNDEF;
+
+	ring_buffer_index = 0;
+
+	block_on_wfi(false);
 }
 
 void ISS::exec_step() {
 	assert(((pc & ~pc_alignment_mask()) == 0) && "misaligned instruction");
 
-	uint32_t mem_word;
 	try {
-		mem_word = instr_mem->load_instr(pc);
+		uint32_t mem_word = instr_mem->load_instr(pc);
 		instr = Instruction(mem_word);
 	} catch (SimulationTrap &e) {
+		printf("[ISS] ERROR: instruction fetch fault at address 0x%08x\n", pc);
 		op = Opcode::UNDEF;
 		instr = Instruction(0);
 		throw;
@@ -138,14 +194,55 @@ void ISS::exec_step() {
 	if (instr.is_compressed()) {
 		op = instr.decode_and_expand_compressed(RV64);
 		pc += 2;
+        if (op != Opcode::UNDEF)
+            REQUIRE_ISA(C_ISA_EXT);
 	} else {
 		op = instr.decode_normal(RV64);
 		pc += 4;
 	}
 
+	if (csrs.instret.reg % 1000000 == 0 && csrs.instret.reg > 0) {
+		// colored progress output (ANSI colors)
+		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%lu\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
+		for (int i = 0; i < 5; ++i) {
+			int idx = (ring_buffer_index + INSTRUCTION_TREE_DEPTH - i) % INSTRUCTION_TREE_DEPTH;
+			auto &step = last_executed_steps[idx];
+			printf("  PC: \x1b[33m0x%08lx\x1b[0m, Opcode: \x1b[35m%s\x1b[0m\n",
+				   step.last_executed_pc,
+				   Opcode::mappingStr[step.last_executed_instruction]);
+		}
+	}
+
+	uint64_t cycles_diff = _compute_and_get_current_cycles() - prev_cycles;
+
+	//insert into tree of oldest instruction, which will be overwritten in the next step
+	Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;
+	if(oldest_op){//ring buffer is still being filled if this is false
+		//check if a tree for this op already exists
+		InstructionNodeR* found_tree = NULL;
+		for (InstructionNodeR& root : instruction_trees){
+			
+			if(root.instruction == oldest_op){
+				found_tree = &root;
+				break;
+			}
+		}
+		if(found_tree!=NULL){
+			//printf("-> %d\n",found_tree->instruction);
+		}else{
+			//printf("first occurance of op %d. Adding to list\n", oldest_op);
+			instruction_trees.emplace_back(oldest_op, 0);
+			found_tree = &instruction_trees.back();
+		}
+		//printf("found tree found or created for op %d", found_tree->instruction);
+
+		//insert ringbuffer - this opcode into tree
+		found_tree->insert_rb(last_executed_steps, 
+							ring_buffer_index);
+	}
+
 	if (trace) {
-		printf("core %2lu: prv %1x: pc %16lx (%8x): %s ", csrs.mhartid.reg, prv, last_pc, mem_word,
-		       Opcode::mappingStr.at(op));
+		printf("core %2u: prv %1x: pc %8x: %s ", csrs.mhartid.reg, prv, last_pc, Opcode::mappingStr[op]);
 		switch (Opcode::getType(op)) {
 			case Opcode::Type::R:
 				printf(COLORFRMT ", " COLORFRMT ", " COLORFRMT, COLORPRINT(regcolors[instr.rd()], regnames[instr.rd()]),
@@ -181,6 +278,11 @@ void ISS::exec_step() {
 		}
 		puts("");
 	}
+
+		//printf("OP: %s\n", Opcode::mappingStr[op]);
+	#ifdef trace_parameter
+	int64_t last_parameter = -1;
+	#endif
 
 	switch (op) {
 		case Opcode::UNDEF:
@@ -291,64 +393,75 @@ void ISS::exec_step() {
 		case Opcode::SB: {
 			uint64_t addr = regs[instr.rs1()] + instr.S_imm();
 			mem->store_byte(addr, regs[instr.rs2()]);
+			log_memory_store(addr, last_pc);
 		} break;
 
 		case Opcode::SH: {
 			uint64_t addr = regs[instr.rs1()] + instr.S_imm();
 			trap_check_addr_alignment<2, false>(addr);
 			mem->store_half(addr, regs[instr.rs2()]);
+			log_memory_store(addr, last_pc);
 		} break;
 
 		case Opcode::SW: {
 			uint64_t addr = regs[instr.rs1()] + instr.S_imm();
 			trap_check_addr_alignment<4, false>(addr);
 			mem->store_word(addr, regs[instr.rs2()]);
+			log_memory_store(addr, last_pc);
 		} break;
 
 		case Opcode::SD: {
 			uint64_t addr = regs[instr.rs1()] + instr.S_imm();
 			trap_check_addr_alignment<8, false>(addr);
 			mem->store_double(addr, regs[instr.rs2()]);
+			log_memory_store(addr, last_pc);
 		} break;
 
 		case Opcode::LB: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			regs[instr.rd()] = mem->load_byte(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::LH: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<2, true>(addr);
 			regs[instr.rd()] = mem->load_half(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::LW: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<4, true>(addr);
 			regs[instr.rd()] = mem->load_word(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::LD: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<8, true>(addr);
 			regs[instr.rd()] = mem->load_double(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::LBU: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			regs[instr.rd()] = mem->load_ubyte(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::LHU: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<2, true>(addr);
 			regs[instr.rd()] = mem->load_uhalf(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::LWU: {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<4, true>(addr);
 			regs[instr.rd()] = mem->load_uword(addr);
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::BEQ:
@@ -784,12 +897,14 @@ void ISS::exec_step() {
 			uint64_t addr = regs[instr.rs1()] + instr.I_imm();
 			trap_check_addr_alignment<4, true>(addr);
 			fp_regs.write(RD, float32_t{(uint32_t)mem->load_uword(addr)});
+			log_memory_read(addr, last_pc);
 		} break;
 
 		case Opcode::FSW: {
 			uint64_t addr = regs[instr.rs1()] + instr.S_imm();
 			trap_check_addr_alignment<4, false>(addr);
 			mem->store_word(addr, fp_regs.u32(RS2));
+			log_memory_store(addr, last_pc);
 		} break;
 
 		case Opcode::FADD_S: {
@@ -1286,6 +1401,52 @@ void ISS::exec_step() {
 		default:
 			throw std::runtime_error("unknown opcode");
 	}
+
+//---------------------------------------------------------------------------------
+//                             save instruction info of last execution
+//---------------------------------------------------------------------------------
+		last_executed_steps[ring_buffer_index].last_executed_instruction = op;
+		last_executed_steps[ring_buffer_index].last_cycles = cycles_diff;
+		last_executed_steps[ring_buffer_index].last_registers = {RS1,RS2,RD};
+		last_executed_steps[ring_buffer_index].last_executed_pc = last_pc;
+		last_executed_steps[ring_buffer_index].last_powermode = 0; //TODO
+		last_executed_steps[ring_buffer_index].last_memory_read = 0;
+		last_executed_steps[ring_buffer_index].last_memory_written = 0;
+		last_executed_steps[ring_buffer_index].last_step_id = total_num_instr;
+		last_executed_steps[ring_buffer_index].last_stack_pointer = regs[RegFile::sp];
+		last_executed_steps[ring_buffer_index].last_frame_pointer = regs[RegFile::fp];
+		last_executed_steps[ring_buffer_index].last_parameter = last_parameter;
+		last_executed_steps[ring_buffer_index].last_peripheral_name = last_memory_peripheral;
+
+		last_executed_steps[ring_buffer_index].last_memory_access_type = std::get<1>(last_memory_access);
+		if(std::get<1>(last_memory_access)==AccessType::STORE){//check if memory was accessed in the last execution step
+			last_executed_steps[ring_buffer_index].last_memory_written = std::get<0>(last_memory_access); //fetch accessed addresses from persistent variable
+			if(last_executed_steps[ring_buffer_index].last_memory_written==0){
+				printf("ERROR ZERO write\n\n\n");
+			}
+			#ifdef debug_dependencies
+			printf("WRITE %lx (%s at idx:%d)\n",last_executed_steps[ring_buffer_index].last_memory_written, Opcode::mappingStr[op], ring_buffer_index);
+			#endif
+		}else{
+			if(std::get<1>(last_memory_access)==AccessType::LOAD)
+			{
+			   last_executed_steps[ring_buffer_index].last_memory_read = std::get<0>(last_memory_access);
+			   #ifdef debug_dependencies
+			   printf("LOAD %lx, (%s at idx:%d)\n", last_executed_steps[ring_buffer_index].last_memory_read, Opcode::mappingStr[op], ring_buffer_index);
+			   #endif
+			}
+			
+		}
+		last_memory_access = {0, AccessType::NONE};//reset last memory access
+		last_memory_peripheral = nullptr;
+
+//-------------------------------------------------------------------------
+//                          
+//-------------------------------------------------------------------------
+	//updating ringbuffer done
+	//update index
+	ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
+
 }
 
 uint64_t ISS::_compute_and_get_current_cycles() {
@@ -1370,6 +1531,19 @@ uint64_t ISS::get_csr_value(uint64_t addr) {
 
 		case FRM_ADDR:
 			return csrs.fcsr.fields.frm;
+
+		// //TODO check again for potential changes for 64bit mode 
+        // // debug CSRs not supported, thus hardwired
+        // case TSELECT_ADDR:
+        //     return 1; // if a zero write by SW is preserved, then debug mode is supported (thus hardwire to non-zero)
+        // case TDATA1_ADDR:
+        // case TDATA2_ADDR:
+        // case TDATA3_ADDR:
+        // case DCSR_ADDR:
+        // case DPC_ADDR:
+        // case DSCRATCH0_ADDR:
+        // case DSCRATCH1_ADDR:
+        //     return 0;
 	}
 
 	if (!csrs.is_valid_csr64_addr(addr))
@@ -1489,6 +1663,17 @@ void ISS::set_csr_value(uint64_t addr, uint64_t value) {
 			csrs.fcsr.fields.frm = value;
 			break;
 
+        // // debug CSRs not supported, thus hardwired //TODO check again for rv64 behavior
+        // case TSELECT_ADDR:
+        // case TDATA1_ADDR:
+        // case TDATA2_ADDR:
+        // case TDATA3_ADDR:
+        // case DCSR_ADDR:
+        // case DPC_ADDR:
+        // case DSCRATCH0_ADDR:
+        // case DSCRATCH1_ADDR:
+		// 	break;
+
 		default:
 			if (!csrs.is_valid_csr64_addr(addr))
 				RAISE_ILLEGAL_INSTRUCTION();
@@ -1510,12 +1695,20 @@ void ISS::sys_exit() {
 	shall_exit = true;
 }
 
+unsigned ISS::get_syscall_register_index() {
+	// if (csrs.misa.has_E_base_isa())
+	// 	return RegFile::a5;
+	// else
+		return RegFile::a7;
+}
+
+
 uint64_t ISS::read_register(unsigned idx) {
 	return regs.read(idx);
 }
 
 void ISS::write_register(unsigned idx, uint64_t value) {
-	regs.write(idx, value);
+	regs.write(idx, (uint64_t)value);
 }
 
 uint64_t ISS::get_progam_counter(void) {
@@ -1553,11 +1746,12 @@ uint64_t ISS::get_hart_id() {
 std::vector<uint64_t> ISS::get_registers(void) {
 	std::vector<uint64_t> regvals;
 
-	for (int64_t v : regs.regs)
-		regvals.push_back(v);
+	for (auto v : regs.regs)
+		regvals.push_back((uint64_t)v);
 
 	return regvals;
 }
+
 
 void ISS::fp_finish_instr() {
 	fp_set_dirty();
@@ -1591,9 +1785,102 @@ void ISS::fp_setup_rm() {
 	softfloat_roundingMode = rm;
 }
 
+bool ISS::prompt_enable_isa(uint32_t ext_mask) {
+	if (suppress_prompts)
+		return false;
+
+	const char *ext_name = isa_extension_name(ext_mask);
+	std::string reply;
+	static constexpr int kPromptTimeoutMs = 10000;
+	std::cout << "\x1b[31m[ERROR]\x1b[39m ISA extension " << ext_name
+	          << " is disabled. Enable for this session? [y/N] (timeout "
+	          << (kPromptTimeoutMs / 1000) << "s): " << std::flush;
+	pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
+	int poll_result = poll(&prompt_fd, 1, kPromptTimeoutMs);
+	if (poll_result <= 0) {
+		if (poll_result == 0)
+			std::cout << "\n\x1b[33m[WARN] Prompt timed out. ISA extension remains disabled.\x1b[39m" << std::endl;
+		return false;
+	}
+	if (!std::getline(std::cin, reply))
+		return false;
+	if (!reply.empty() && (reply[0] == 'y' || reply[0] == 'Y')) {
+		csrs.misa.reg |= ext_mask;
+		return true;
+	}
+	return false;
+}
+
+bool ISS::prompt_allow_misaligned_access(uint64_t addr, bool isLoad, unsigned alignment) {
+	if (always_trap_misaligned_access) {
+		boost::io::ios_flags_saver ifs(std::cout); //flags saver guarantees restore of std::cout state after scope exit (maybe also use at other prints?)
+		std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
+		          << " access at 0x" << std::hex << addr << std::dec
+		          << " (alignment " << alignment << ")." << std::endl;
+		return false;
+	}
+	if (suppress_prompts)
+		return false;
+
+	boost::io::ios_flags_saver ifs(std::cout);
+	std::string reply;
+	static constexpr int kPromptTimeoutMs = 10000;
+	std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
+	          << " access at 0x" << std::hex << addr << std::dec
+	          << " (alignment " << alignment << ").\n"
+	          << "Permit? \x1b[31m(This is very likely an error!)\x1b[39m [y] once, [a] always allow, [t] always trap, [N] trap (timeout "
+	          << (kPromptTimeoutMs / 1000) << "s): \x1b[0m" << std::flush;
+	
+	pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
+	int poll_result = poll(&prompt_fd, 1, kPromptTimeoutMs);
+	if (poll_result <= 0) {
+		if (poll_result == 0)
+			std::cout << "\n\x1b[33m[WARN] Prompt timed out. Misaligned access not permitted." << std::endl;
+		return false;
+	}
+	if (!std::getline(std::cin, reply))
+		return false;
+	if (!reply.empty()) {
+		char c = reply[0];
+		if (c == 'y' || c == 'Y')
+			return true;
+		if (c == 'a' || c == 'A') {
+			allow_misaligned_access = true;
+			return true;
+		}
+		if (c == 't' || c == 'T') {
+			always_trap_misaligned_access = true;
+			return false;
+		}
+	}
+	return false;
+}
+
 void ISS::fp_require_not_off() {
-	if (csrs.mstatus.fields.fs == FS_OFF)
+	if (csrs.mstatus.fields.fs == FS_OFF){
+		if (suppress_prompts)
+			RAISE_ILLEGAL_INSTRUCTION();
+		// in case FS is off, ask the user if they want to ignore the error for this session and turn FS on
+		std::string reply;
+		static constexpr int kPromptTimeoutMs = 10000;
+		std::cout << "\x1b[31m[ERROR]\x1b[39m Floating-point unit (FS) is off. Enable FP for this session? [y/N] (timeout "
+		          << (kPromptTimeoutMs / 1000) << "s): " << std::flush;
+		pollfd prompt_fd {STDIN_FILENO, POLLIN, 0};
+		int poll_result = poll(&prompt_fd, 1, kPromptTimeoutMs);
+		if (poll_result <= 0) {
+			if (poll_result == 0)
+				std::cout << "\n\x1b[33m[WARN] Prompt timed out. FP remains disabled.\x1b[39m" << std::endl;
 		RAISE_ILLEGAL_INSTRUCTION();
+		}
+		if (!std::getline(std::cin, reply))
+			RAISE_ILLEGAL_INSTRUCTION();
+		if (!reply.empty() && (reply[0] == 'y' || reply[0] == 'Y')) {
+			// enable FP in INITIAL state
+			csrs.mstatus.fields.fs = FS_INITIAL;
+			return;
+		}
+		RAISE_ILLEGAL_INSTRUCTION();
+	}
 }
 
 void ISS::return_from_trap_handler(PrivilegeLevel return_mode) {
@@ -1814,6 +2101,17 @@ void ISS::switch_to_trap_handler(PrivilegeLevel target_mode) {
 
 			pc = csrs.mtvec.get_base_address();
 
+			if(pc == 0) {
+				if(error_on_zero_traphandler) {
+					throw std::runtime_error("[ISS] Took null trap handler in machine mode");
+				} else {
+					static bool once = true;
+					if (once)
+						std::cout << "[ISS] Warn: Taking trap handler in machine mode to 0x0, this is probably an error." << std::endl;
+					once = false;
+				}
+			}
+
 			if (csrs.mcause.fields.interrupt && csrs.mtvec.fields.mode == csr_mtvec::Mode::Vectored)
 				pc += 4 * csrs.mcause.fields.exception_code;
 			break;
@@ -1853,6 +2151,8 @@ void ISS::switch_to_trap_handler(PrivilegeLevel target_mode) {
 }
 
 void ISS::performance_and_sync_update(Opcode::Mapping executed_op) {
+    ++total_num_instr;
+
 	if (!csrs.mcountinhibit.fields.IR)
 		++csrs.instret.reg;
 
@@ -1891,13 +2191,16 @@ void ISS::run_step() {
 
 		auto x = compute_pending_interrupts();
 		if (x.target_mode != NoneMode) {
+			if (trace)
+			{
+				printf("target_mode != NoneMode, pending=%d\n", x.pending);
+			}
 			prepare_interrupt(x);
 			switch_to_trap_handler(x.target_mode);
 		}
 	} catch (SimulationTrap &e) {
 		if (trace)
-			std::cout << "take trap " << e.reason << ", mtval=" << boost::format("%x") % e.mtval
-			          << ", pc=" << boost::format("%x") % last_pc << std::endl;
+			std::cout << "take trap " << e.reason << ", mtval=" << e.mtval << std::endl;
 		auto target_mode = prepare_trap(e);
 		switch_to_trap_handler(target_mode);
 	}
@@ -1926,11 +2229,765 @@ void ISS::run() {
 	quantum_keeper.sync();
 }
 
+void ISS::flush_ringbuffer(){
+	for (size_t offset = 1; offset < INSTRUCTION_TREE_DEPTH; offset++) //TODO check if this has to start at index 0
+	{
+		ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
+
+		//advance ringbuffer index and insert current instruction into tree (as if it were the oldest entry)
+		Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;
+		if(oldest_op){//ring buffer was not completely filled - just skip this entry 
+			//check if a tree for this op already exists
+			InstructionNodeR* found_tree = NULL;
+			for (InstructionNodeR& root : instruction_trees){
+				
+				if(root.instruction == oldest_op){
+					found_tree = &root;
+					break;
+				}
+			}
+			if(found_tree!=NULL){
+			}else{
+				// printf("first occurance of op %d during flush\n", oldest_op);
+				instruction_trees.emplace_back(oldest_op, 0);
+				found_tree = &instruction_trees.back();
+			}
+			//printf("flush: inserting with offset %d\n", offset);
+
+			//insert ringbuffer - this opcode into tree
+			found_tree->insert_rb(last_executed_steps, 
+								ring_buffer_index, offset);
+		}
+		// else{
+		// 	printf("flush: skipping empty entry at offset %d\n", offset);
+		// }
+	}
+	
+	
+}
+
+void ISS::output_dot(std::streambuf *cout_save){
+	std::ofstream output;
+	if (is_single_file || output_filename_string.empty()) {
+			if (!output_filename_string.empty()) {
+				std::cout << "writing to file " << output_filename << std::endl;
+				output = std::ofstream(output_filename);
+				output << "//" << std::time(0) << std::endl;
+				std::cout.rdbuf(output.rdbuf());
+			}
+
+			std::cout << "digraph g{" << std::endl;
+			//shape = record
+			std::cout << "node [shape = plaintext, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
+
+			for (InstructionNodeR& tree : instruction_trees){
+				//tree.print();
+				tree.tree_to_dot(csrs.instret.reg);
+			}
+
+			std::cout << "}" << std::endl; 
+
+			if (!output_filename_string.empty()) { //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+
+			std::cout << std::hex;
+			for (const auto& n : memory_access_map) {
+				std::cout << n.first << " [" << std::get<0>(n.second) << " | " << std::get<1>(n.second) << "]" << std::endl;
+			}
+			std::cout << std::dec;
+
+		}else{//one dot file for each opcode output in directory
+			std::string single_output_filename = "";
+			std::cout << "writing dot files to directory " << output_filename << std::endl;
+			//output = std::ofstream(output_filename);
+			//output << "//" << std::time(0) << std::endl;
+			//std::cout.rdbuf(output.rdbuf());
+			uint64_t index = 0;
+			for (InstructionNodeR& tree : instruction_trees){
+				index++;
+				single_output_filename = output_filename + 
+										std::string(Opcode::mappingStr[tree.instruction]) + 
+										std::string(".dot");
+				output = std::ofstream(single_output_filename);
+				output << "// " << std::time(0) << std::endl;
+				std::cout.rdbuf(output.rdbuf());
+
+				std::cout << "digraph g{" << std::endl;
+				std::cout << "node [shape = plaintext, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
+				std::cout << "edge [style=\"solid\", arrowsize = .5];" << std::endl; //don't use colorscheme greys9 for now
+
+				//tree.print();
+				tree.tree_to_dot(csrs.instret.reg);
+				std::cout << "}" << std::endl; 
+			}
+
+
+			//output memory access map
+			single_output_filename = output_filename +  std::string("memory_map.md");
+			output = std::ofstream(single_output_filename);
+			output << "// " << std::time(0) << std::endl;
+			std::cout.rdbuf(output.rdbuf());
+			
+			std::cout << std::hex;
+			for (const auto& n : memory_access_map) {
+				std::cout << n.first << " [" << std::get<0>(n.second) << " | " << std::get<1>(n.second) << "]" << std::endl;
+			}
+			std::cout << std::dec;
+
+
+			if (!output_filename_string.empty()) { //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		}
+}
+
+void ISS::output_csv(std::streambuf *cout_save){
+	std::ofstream output;
+	if (output_filename_string.empty()) {
+		
+			std::cout << "[ERROR] No output directory set for csv export" << std::endl;
+
+		}else{
+			std::string single_output_filename = "";
+
+			std::string file_path = std::string(input_filename);
+			std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
+			
+			std::cout << "writing csv files to directory " << output_filename << std::endl;
+			single_output_filename = output_filename + 
+										std::string("Execution_Trees_") + 
+										application_name + 
+										std::string(".csv");
+			output = std::ofstream(single_output_filename);
+			std::cout.rdbuf(output.rdbuf());
+
+			std::cout  << "id;"
+					   << "parentId;" 
+					   << "tree;"
+					   << "instruction;"
+					   << "weight;"
+					   << "weightDifference;"
+					   << "weightDifferenceMax;"
+					   << "weightDifferenceTotal;"
+					   << "length;"
+					   << "lengthDifference;"
+					   << "cycles;"
+					   << "dependencyScore;"
+					   << "dependencyScoreTotal;"
+					   << "dependenciesTrue;"
+					   << "dependenciesAnti;"
+					   << "dependenciesOut;"
+					   << "dependenciesTrueTotal;"
+					   << "dependenciesAntiTotal;"
+					   << "dependenciesOutTotal;"
+					   << "children;"
+					   << "childrenDifference;"
+					   << "inputs;"
+					   << "inputsTotal;"
+					   << "outputs;"
+					   << "outputsTotal;"
+					   << "instructionTypes;"
+					   << "branches;"
+					   << "occurrenceStart;"
+					   << "occurrenceBeginning;"
+					   << "occurrenceMid;"
+					   << "occurrenceEnd;"
+					   << "programCounters;"
+					   << "programCountersDifference"
+					   << std::endl;
+
+
+			uint64_t index = 0;
+			std::bitset<32> total_inputs;
+			std::map<InstructionType, uint32_t> instruction_types;
+			uint64_t total_max_weight = 0;
+			for (InstructionNodeR& tree : instruction_trees){
+				if(tree.weight > total_max_weight){
+					total_max_weight = tree.weight;
+				}
+			}
+			//total_inputs.reset();
+			for (InstructionNodeR& tree : instruction_trees){
+				index++;
+				tree.to_csv({
+					csrs.instret.reg,
+					Opcode::mappingStr[tree.instruction],
+					1, //depth
+					0,0,0,0,0,0,
+					instruction_types, 
+					0, 
+					tree.weight,
+					tree.weight,//last_weight
+					total_max_weight,
+					tree.get_pc().size(),
+				});
+			}
+
+
+
+			if (!output_filename_string.empty()) { //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		}
+	}
+
+void ISS::output_coverage_csv(const std::vector<Path>& sequences,
+			std::function<float(const ScoreParams)> score_function) {
+	if (!output_coverage_csv_enabled || coverage_csv_file.empty()) {
+		return;
+	}
+
+	std::string output_path = coverage_csv_file;
+	if (!output_path.empty() && output_path[0] != '/' && !output_filename_string.empty()) {
+		output_path = output_filename_string + output_path;
+	}
+
+	std::ofstream output(output_path);
+	if (!output.is_open()) {
+		std::cerr << "[ERROR] Could not open coverage csv output: " << output_path << std::endl;
+		return;
+	}
+
+	output << "sequence;length;weight;true_weight;score;top_pc;top_pc_count;coverage\n";
+
+	for (const auto& seq : sequences) {
+		std::map<uint64_t, int> pc_counts;
+		if (seq.end_of_sequence) {
+			pc_counts = seq.end_of_sequence->get_pc();
+		}
+
+		uint64_t top_pc = 0;
+		int top_pc_count = 0;
+		for (const auto& entry : pc_counts) {
+			if (entry.second > top_pc_count) {
+				top_pc = entry.first;
+				top_pc_count = entry.second;
+			}
+		}
+
+		uint64_t true_weight = 0;
+		if (seq.end_of_sequence) {
+			true_weight = seq.end_of_sequence->true_weight;
+		}
+		double coverage = 0.0;
+		if (csrs.instret.reg > 0) {
+			coverage = (static_cast<double>(seq.length) * static_cast<double>(true_weight)) /
+				static_cast<double>(csrs.instret.reg);
+		}
+
+		std::ostringstream pc_stream;
+		pc_stream << "0x" << std::hex << top_pc;
+
+		output << "\"" << opcode_sequence_to_string(seq) << "\";"
+				<< seq.length << ";"
+				<< seq.minimum_weight << ";"
+				<< true_weight << ";"
+				<< seq.get_score(score_function) << ";"
+				<< pc_stream.str() << ";"
+				<< top_pc_count << ";"
+				<< coverage
+				<< "\n";
+	}
+}
+
+void ISS::output_json(std::streambuf *cout_save, 
+		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists){
+	std::ofstream output;
+	nlohmann::json top_level_json;
+		int idx = 0;
+		printf("Converting Full Paths to JSON\n");
+		for (auto &&seq : discovered_sequences_node_list)
+		{
+			printf(".");
+			nlohmann::json path_node_json_array = nlohmann::json::array();
+			for (auto &&node : seq)
+			{
+				nlohmann::json path_node_json = node.to_json();	
+				path_node_json_array.push_back(path_node_json);
+
+			}
+			std::string key = "Sequence" + std::to_string(idx);
+			top_level_json[key] = path_node_json_array;
+
+
+			int sub_idx = 0;
+			for (auto &&sub_seq : discovered_sub_sequences_node_lists.at(idx))
+			{
+				nlohmann::json sub_sequence_json_array = nlohmann::json::array();
+				for (auto &&node : sub_seq)
+				{
+					nlohmann::json path_node_json = node.to_json();	
+					sub_sequence_json_array.push_back(path_node_json);
+
+				}
+				std::string sub_sequence_key = key + "-" + std::to_string(sub_idx);
+				top_level_json[sub_sequence_key] = sub_sequence_json_array;
+				sub_idx++;
+			}
+			int variant_idx = 0;
+			for (auto &&variant_seq : discovered_variant_sequences_node_lists.at(idx))
+			{
+				nlohmann::json variant_sequence_json_array = nlohmann::json::array();
+				for (auto &&node : variant_seq)
+				{
+					nlohmann::json path_node_json = node.to_json();	
+					variant_sequence_json_array.push_back(path_node_json);
+
+				}
+				std::string variant_sequence_key = key + "v" + std::to_string(variant_idx);
+				top_level_json[variant_sequence_key] = variant_sequence_json_array;
+				variant_idx++;
+			}
+			idx++;
+		}
+		printf("\n");
+
+
+		//save or print json
+		if (output_filename_string.empty()) {
+			
+			std::cout << top_level_json.dump(JSON_INDENT) << std::endl;
+
+		}else{
+			std::string single_output_filename = "";
+			std::cout << "writing json to directory " << output_filename << std::endl;
+
+			std::string file_path = std::string(input_filename);
+			std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
+
+			single_output_filename = output_filename + 
+									std::string("sequences_") + 
+									application_name + 
+									std::string(".json");
+			std::cout << "Sequence file: " << single_output_filename << std::endl;
+			output = std::ofstream(single_output_filename);
+			std::cout.rdbuf(output.rdbuf());
+
+			std::cout << top_level_json.dump(JSON_INDENT) << std::endl;
+
+
+
+			if (!output_filename_string.empty()) { //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		}
+}
+
+void ISS::output_full(std::streambuf *cout_save){
+	std::ofstream output;
+	nlohmann::ordered_json top_level_json;
+	std::cout << "writing json to directory " << output_filename << std::endl;
+
+	std::string single_output_filename = "";
+	uint64_t index = 0;
+	for (InstructionNodeR& tree : instruction_trees){
+		nlohmann::ordered_json tree_json_array = nlohmann::ordered_json::array();
+		std::string file_path = std::string(input_filename);
+		std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
+		single_output_filename = output_filename + application_name +
+								std::string(Opcode::mappingStr[tree.instruction]) + 
+								std::string(".json");
+
+		output = std::ofstream(single_output_filename);
+		std::cout.rdbuf(output.rdbuf());
+		tree_json_array = tree.to_json();
+		std::string json_string = tree_json_array.dump(JSON_INDENT);
+		std::cout << json_string << std::endl;
+		index++;
+
+		//csrs.instret.reg
+		printf(".");
+
+	}
+	printf("Done\n");
+
+			if (!output_filename_string.empty()) { //reset cout
+				std::cout.rdbuf(cout_save);
+				std::cout << "restored cout" << std::endl;
+			}
+		// }
+}
+
 void ISS::show() {
+	flush_ringbuffer();//insert all instructions currently in the ringbuffer into their trees
 	boost::io::ios_flags_saver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
 	std::cout << "simulation time: " << sc_core::sc_time_stamp() << std::endl;
 	regs.show();
 	std::cout << "pc = " << std::hex << pc << std::endl;
 	std::cout << "num-instr = " << std::dec << csrs.instret.reg << std::endl;
+
+	std::cout << "==========================\n==========================\n";
+	std::cout << "execution statistics: (" << instruction_trees.size() << " Trees)" << std::endl;
+
+	//std::ostream output = std::cout;
+	std::streambuf *cout_save = std::cout.rdbuf();
+
+	if(output_as_dot){
+		output_dot(cout_save);
+	}
+	if(output_as_csv){
+		output_csv(cout_save);
+	}
+	if(output_full_export){
+		output_full(cout_save);
+	}
+
+	//find best instruction squence for each tree
+	std::vector<Path> discovered_sequences; 
+	std::vector<std::vector<Path>> discovered_sub_sequences;  //TODO currently not used
+	int i = 0;
+	printf("start analysis\n");
+	std::vector<Path> tmp_discovered_sub_sequences; 
+	auto sf = [](ScoreParams p) -> float {
+		float score = (p.length * p.weight);// * p.score_multiplier //TODO update to use true weight instead
+			//+ p.weight * p.score_bonus; //length * minimum_weight;
+		return score;
+	};
+	for (InstructionNodeR& tree : instruction_trees){
+		std::vector<Path> top_paths = tree.extend_top_paths({1, 0, 1.0, i, -1, Opcode::Mapping::UNDEF, sf}, coverage_top_n);
+		discovered_sequences.insert(discovered_sequences.end(), top_paths.begin(), top_paths.end());
+		i++;
+		printf(".");
+	}
+	printf("-> analyzed all trees\n");
+
+	//sort discovered paths to print most relevant ones last
+	// std::function<float(ScoreParams)> score_func = sf;
+	std::sort(discovered_sequences.begin(), discovered_sequences.end(), 
+	[sf](Path a, Path b) -> bool{
+		return a.get_score(sf)<b.get_score(sf);
+	});
+
+	{
+		std::vector<Path> sequences_sorted = discovered_sequences;
+		std::sort(sequences_sorted.begin(), sequences_sorted.end(),
+			[sf](const Path& a, const Path& b) -> bool {
+				return a.get_score(sf) > b.get_score(sf);
+			});
+		printf("\n ----------------------------\n| Best Sequences (Coverage) |\n ----------------------------\n");
+		for (size_t idx = 0; idx < std::min<size_t>(4, sequences_sorted.size()); ++idx) {
+			sequences_sorted[idx].show();
+		}
+	}
+
+	if (output_coverage_csv_enabled) {
+		std::vector<Path> sequences_sorted = discovered_sequences;
+		std::sort(sequences_sorted.begin(), sequences_sorted.end(),
+			[sf](const Path& a, const Path& b) -> bool {
+				return a.get_score(sf) > b.get_score(sf);
+			});
+		std::vector<Path> filtered = filter_top_sequences(
+			sequences_sorted,
+			static_cast<size_t>(coverage_top_n),
+			coverage_similarity_threshold);
+		output_coverage_csv(filtered, sf);
+	}
+
+	std::vector<std::vector<PathNode>> discovered_sequences_node_list;
+	std::vector<std::vector<BranchingPoint>> discovered_variant_starting_points;
+	std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists;
+	std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists;
+
+	std::string file_path = std::string(input_filename);
+	std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
+	std::string csv_stats = "";
+	csv_stats = output_filename + 
+								std::string("Stats10_") + 
+								application_name + 
+								std::string(".csv");
+
+	// Write CSV header once, before the loop
+	#ifdef output_stats
+	{
+		std::ofstream csv_out(csv_stats, std::ios::app);
+		csv_out.seekp(0, std::ios::end);
+		if (csv_out.tellp() == 0) {
+			csv_out << "Opcodes;Length;Weight;Score;Hash;Coverage\n";
+		}else{
+			csv_out.seekp(0, std::ios::end); // Move to the end of the file
+			csv_out << "\n"; // Add a newline to separate from previous content
+		}
+	}
+	#endif
+
+	printf("\n -----------------\n| Best Sequences |\n -----------------\n");
+	for (auto &&p : discovered_sequences)
+	{
+
+		//find matching tree for path //maybe just store a reference in path?
+		InstructionNodeR* found_tree = NULL;
+		for (InstructionNodeR& root : instruction_trees){
+			
+			if(root.instruction == p.opcodes[0]){
+				found_tree = &root;
+				break;
+			}
+		}
+		if(found_tree==NULL){ //this should never happen, as there has to exist a tree to find a path in the first place
+			printf("[ERROR] Could not find matching tree for discovered path\nOpcode: %s\n", Opcode::mappingStr[p.opcodes[0]]);
+		}
+
+		std::vector<PathNode> full_path;
+		full_path = found_tree->path_to_path_nodes(p, 0);
+		std::vector<BranchingPoint> variant_starting_points = found_tree->find_variant_branch(p, 0);
+		//sort variant starting points, so we can extend the top N
+		std::sort(variant_starting_points.begin(), variant_starting_points.end(), 
+		[](BranchingPoint a, BranchingPoint b) -> bool{
+			return a.ratio>b.ratio;
+		});
+
+		#ifdef log_variants
+		for (auto &&v : variant_starting_points)
+		{
+			printf("Variant Branching Point: %s at %d, with ratio %.4f\n", Opcode::mappingStr[v.instruction], v.depth, v.ratio);
+		}
+		#endif
+
+		discovered_sequences_node_list.push_back(full_path);
+		discovered_variant_starting_points.push_back(variant_starting_points);
+
+		//force extend to top N variant starting points
+		std::vector<Path> tmp_discovered_variants; 
+		uint8_t max_variants = !(variant_starting_points.size()<MAX_VARIANTS)?MAX_VARIANTS:variant_starting_points.size();
+		for (int32_t i = 0; i < max_variants; i++)
+		{
+			//convert to Path first (up to new branching point and then force extension)
+			Path tmp_variant = found_tree->extend_path({1, 0, 1.0, i, variant_starting_points[i].depth, 
+									variant_starting_points[i].instruction, sf});
+			tmp_discovered_variants.push_back(tmp_variant);
+		}
+		
+		printf("-------------------------------------------\n");
+		//print discovered sequences
+		//print top sequence for each tree
+		//p.show();	//This line actualy prints the formatted sequences 
+		// printf("Stats:\n");
+		// p.to_csv_stats();
+		//print stats of sequence to file as csv
+
+		{
+			std::ofstream csv_out(csv_stats, std::ios::app);
+			#ifdef output_stats
+			p.to_csv_stats(csv_out, csrs.instret.reg);
+			#endif
+		}
+
+		tmp_discovered_sub_sequences = p.end_of_sequence->force_path_extension(p, sf);
+		
+		//printf("last Node in sequence should be %s\n", Opcode::mappingStr[p.end_of_sequence->instruction]);
+		#ifdef log_variants
+		printf("-------------------------------------------\n");
+		printf("Sub Sequences (%d)\n[\n",tmp_discovered_sub_sequences.size());
+		#endif
+
+		std::vector<std::vector<PathNode>> tmp_node_list;
+		for (auto &&subseq : tmp_discovered_sub_sequences)
+		{
+			#ifdef log_variants
+			printf(" - Sub Sequence:\n");
+			subseq.show(" - ");
+			printf(" - ,\n");
+			#endif
+			tmp_node_list.push_back(found_tree->path_to_path_nodes(subseq, 0));
+		}
+		discovered_sub_sequences_node_lists.push_back(tmp_node_list);
+		discovered_sub_sequences.push_back(tmp_discovered_sub_sequences);
+
+		//convert variants to path nodes
+		std::vector<std::vector<PathNode>> tmp_variant_node_list;
+		for (auto &&variant : tmp_discovered_variants)
+		{
+			#ifdef log_variants
+			printf(" - Variant Sequence:\n");
+			variant.show(" - ");
+			printf(" - ,\n");
+			#endif
+			tmp_variant_node_list.push_back(found_tree->path_to_path_nodes(variant, 0));
+		}
+		discovered_variant_sequences_node_lists.push_back(tmp_variant_node_list);
+		#ifdef log_variants
+		printf("]\n-------------------------------------discovered_sequences_node_list------\n");
+		#endif
+	}
+
+	{
+		#ifdef output_stats
+		std::ofstream csv_out(csv_stats, std::ios::app);
+		csv_out << csrs.instret.reg << ";" "\n";
+		#endif
+	}
+	
+	if(output_as_json){
+		output_json(cout_save, discovered_sequences_node_list, 
+			discovered_sub_sequences_node_lists, 
+			discovered_variant_sequences_node_lists);
+	}
+
+	
+	float total_percent = 1.0;
+	if(discovered_sequences.empty()){
+		printf("[Warning] Ringbuffer was not filled at least once. \nThis means, the whole program fits into one sequence. \nYou probably want to execute a longer program or decrease the tree bound.\n");
+
+	}else{
+		//print some additional info
+		total_percent = (float)discovered_sequences.back().minimum_weight * (float)discovered_sequences.back().length / (float)csrs.instret.reg;
+		std::cout << "inverse dependency score " << discovered_sequences.back().inverse_dependency_score << std::endl;
+		std::cout << "partially normalized potential " << discovered_sequences.back().get_normalized_score() << std::endl;
+		std::cout << "normalized potential " << discovered_sequences.back().get_normalized_score() * total_percent * 100 << std::endl;
+
+		std::list<Opcode::Mapping> unused_instructions; 
+		for (size_t i = Opcode::Mapping::ADD; i < Opcode::Mapping::NUMBER_OF_INSTRUCTIONS; i++)
+		{
+			Opcode::Mapping c_op = (Opcode::Mapping)i;
+			bool found = false;
+			for (InstructionNodeR& tree : instruction_trees){
+				if(tree.instruction == c_op){
+					found = true;
+				}
+			}
+			if(!found){
+				unused_instructions.emplace_back(c_op);
+			}
+		}
+		std::cout << "\n[Unused Instructions]" << std::endl;
+		if(unused_instructions.size()>0){
+			std::cout << unused_instructions.size() << std::endl;
+		}else{
+			std::cout << "- NONE -" << std::endl;
+		}
+
+
+		//evaluate additional score functions
+		LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
+		std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
+		if(sf_lib.handle){
+			if(sf_lib.functions.size() > 0){//TODO 
+				score_functions = sf_lib.functions;
+
+				// Access the score_functions array and call the functions
+				std::cout << "Testing loaded score functions: " << std::endl;
+				for (const auto& func : score_functions) {
+					std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
+				}
+			}else{
+				std::cout << "Error loading scoring functions from library\nSkipping additional scoring functions" << std::endl;
+			}
+		}else{
+			std::cout << "Could not find library at default path\nSkipping additional scoring functions" << std::endl;
+		}
+
+		if(interactive_mode){
+			printf("start score function analysis\n");
+			int run_id = 0;
+
+			while (true) {
+				std::cout << "\nEnter \n" 
+							<< "\t'a' to run tree analysis\n"
+							<< "\t'b' to run analysis performance benchmark\n"
+							<< "\t'r' to reload the library\n" 
+							<< "\t'p [% threshold]' to prune trees\n" 
+							<< "\t'd' to export as dot\n" 
+							<< "\t'e' for a full export as json\n" 
+							<< "\t'q' to quit\n" 
+							<< ":"<< std::endl;
+				std::string userInput; 
+				std::cin >> userInput;
+				char mode = userInput[0];
+
+				if (mode == 'r') {
+					// Reload the library and get the updated array of functions
+					dlclose(sf_lib.handle);
+					std::string library_path = 
+							"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
+					sf_lib = load_scoring_functions(library_path);
+					score_functions = sf_lib.functions;
+					//TODO add checks for library and allow to specify custom path
+					run_id++;
+				} 
+				else if(mode == 'a'){ //run analysis
+					analyze_trees(score_functions, instruction_trees);
+				} 
+				else if(mode == 'b'){ //run analysis benchmark
+					using std::chrono::high_resolution_clock;
+					using std::chrono::duration;
+					using std::chrono::milliseconds;
+
+					auto time_analysis1 = high_resolution_clock::now();
+					for (size_t i = 0; i < 100; i++)
+					{
+						analyze_trees(score_functions, instruction_trees);
+					}
+					auto time_analysis2 = high_resolution_clock::now();
+					duration<double, std::milli> ms_double = time_analysis2 - time_analysis1;
+
+					std::cout << "Analysis of 300  SF took " << ms_double.count() << "ms\n" 
+						<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
+				} 
+				else if (mode == 'q') {
+					dlclose(sf_lib.handle);
+					break;
+				} 
+				else if (mode == 'p') {
+					float prune_threshold = PRUNE_THRESHOLD_WEIGHT;
+					if(userInput.length() > 1){
+						try {
+							prune_threshold = std::stof(userInput.substr(1))/100.0;
+							std::cout << "Start pruning trees with threshold " << prune_threshold << std::endl;
+						} catch (const std::invalid_argument& e) {
+							std::cout << "No valid threshold specified. Set to default (" << PRUNE_THRESHOLD_WEIGHT << ")" << std::endl;
+						}
+					}
+					for (auto &&tree : instruction_trees)
+					{
+						printf("\tPruning with absolute threshold: %f\n", tree.weight * prune_threshold);
+						tree.prune_tree(tree.weight * prune_threshold, 0);	
+					}
+				} 
+				else if (mode == 'd') {
+					printf("exporting trees to dot\n");
+					std::streambuf *cout_save = std::cout.rdbuf();
+					output_dot(cout_save);
+				}
+				else if (mode == 'e') {
+					printf("exporting trees to json\n");
+					std::streambuf *cout_save = std::cout.rdbuf();
+					output_full(cout_save);
+				} 
+				else {
+					std::cout << "Invalid input." << std::endl;
+				}
+			}
+		}
+		
+		//close library
+		if(sf_lib.handle){
+			dlclose(sf_lib.handle);
+		}
+	}
+	std::cout << "total instructions: " << csrs.instret.reg << "(" << total_num_instr << ")" << " [" << total_percent*100 << "]" << std::endl;
+	std::cout << "total cycles: " << _compute_and_get_current_cycles() << std::endl;
+
+	if(discovered_sequences.empty()){
+		std::cout << "Best sequence: " << "NONE (the whole program fits into one sequence)" 
+		<< "\nLength: " << csrs.instret.reg 
+		<< "\nWeight: " << 1 
+		<< "\n%:      [" << total_percent*100 << "]"
+		<< "\nTotal:  " << csrs.instret.reg
+		<< "\nNP:     1.0" << std::endl;
+	}else{
+		std::cout << "Best sequence: " << Opcode::mappingStr[discovered_sequences.back().opcodes[0]] 
+		<< "\nLength: " << discovered_sequences.back().length 
+		<< "\nWeight: " << discovered_sequences.back().minimum_weight
+		<< "\n%:      [" << total_percent*100 << "]"
+		<< "\nTotal:  " << csrs.instret.reg
+		<< "\nNP:     " << discovered_sequences.back().get_normalized_score() << std::endl;
+	}
 }

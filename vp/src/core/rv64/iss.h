@@ -6,12 +6,14 @@
 #include "core/common/instr.h"
 #include "core/common/irq_if.h"
 #include "core/common/trap.h"
+#include "core/common/debug.h"
 #include "csr.h"
 #include "fp.h"
 #include "mem_if.h"
 #include "syscall_if.h"
 #include "util/common.h"
-#include "debug.h"
+
+#include "trace.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -28,6 +30,21 @@
 #include <tlm_utils/simple_initiator_socket.h>
 #include <tlm_utils/tlm_quantumkeeper.h>
 #include <systemc>
+
+#include <list>
+//#include <queue>
+
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  (byte & 0x80 ? '1' : '0'), \
+  (byte & 0x40 ? '1' : '0'), \
+  (byte & 0x20 ? '1' : '0'), \
+  (byte & 0x10 ? '1' : '0'), \
+  (byte & 0x08 ? '1' : '0'), \
+  (byte & 0x04 ? '1' : '0'), \
+  (byte & 0x02 ? '1' : '0'), \
+  (byte & 0x01 ? '1' : '0')
+
 
 namespace rv64 {
 
@@ -137,7 +154,7 @@ struct PendingInterrupts {
 	uint64_t pending;
 };
 
-struct ISS : public external_interrupt_target, public clint_interrupt_target, public debug_target_if, public iss_syscall_if {
+struct ISS : public external_interrupt_target, public clint_interrupt_target, public iss_syscall_if, public debug_target_if {
 	clint_if *clint = nullptr;
 	instr_memory_if *instr_mem = nullptr;
 	data_memory_if *mem = nullptr;
@@ -149,18 +166,70 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	bool trace = false;
 	bool shall_exit = false;
 	bool ignore_wfi = false;
-	bool suppress_prompts = false;
+    bool error_on_zero_traphandler = false;
 	csr_table csrs;
 	PrivilegeLevel prv = MachineMode;
 	int64_t lr_sc_counter = 0;
+	uint64_t total_num_instr = 0;
+
+	bool is_single_file = false;
+	bool output_as_dot = false;
+	bool output_as_csv = false;
+	bool output_as_json = false;
+	bool output_full_export = false;
+	bool output_coverage_csv_enabled = false;
+	bool interactive_mode = false;
+	bool suppress_prompts = false;
+	bool allow_misaligned_access = false;
+	bool always_trap_misaligned_access = false;
 
 	// last decoded and executed instruction and opcode
 	Instruction instr;
 	Opcode::Mapping op;
 
+	//one entry for each different instruction, representing the root node
+	std::list<InstructionNodeR> instruction_trees; //TODO maybe allow derived classes if their info becomes necessary
+	//last_executed instructions as a ring buffer
+	std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps; 
+
+	uint64_t prev_cycles = 0;
+
+	std::map<uint64_t, std::tuple<uint64_t,uint64_t>> memory_access_map; //map mem -> write_access | load_access
+	std::tuple<uint64_t, AccessType> last_memory_access = {-1, AccessType::NONE}; //address, is_store = 2 is_load = 1 no_memory_access=0
+
+	//system-level peripheral address ranges, registered by the platform (e.g. main.cpp) via register_peripheral_region
+	struct PeripheralRegion {
+		std::string name;
+		uint64_t start;
+		uint64_t end;
+	};
+	std::vector<PeripheralRegion> peripheral_regions;
+	const char* last_memory_peripheral = nullptr; //peripheral name hit by the most recent memory access, if any
+
+	void register_peripheral_region(const std::string& name, uint64_t start, uint64_t end) {
+		peripheral_regions.push_back({name, start, end});
+	}
+
+	const char* resolve_peripheral(uint64_t addr) const {
+		for (const auto& region : peripheral_regions) {
+			if (addr >= region.start && addr <= region.end)
+				return region.name.c_str();
+		}
+		return nullptr;
+	}
+
+	uint8_t ring_buffer_index =  0;
 	CoreExecStatus status = CoreExecStatus::Runnable;
 	std::unordered_set<uint64_t> breakpoints;
 	bool debug_mode = false;
+
+	std::string output_filename_string;
+	const char* output_filename;
+	std::string coverage_csv_file;
+	unsigned int coverage_top_n = 10;
+	float coverage_similarity_threshold = 0.2f;
+	uint64_t *path_hashes;
+	const char* input_filename;
 
 	sc_core::sc_event wfi_event;
 
@@ -174,7 +243,30 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	static constexpr int64_t REG32_MIN = INT32_MIN;
 	static constexpr unsigned xlen = 64;
 
-	ISS(uint64_t hart_id);
+	ISS(uint64_t hart_id, const char *output_filename = "", const char *input_filename = "", std::vector<uint64_t> input_hashes = {}, bool use_E_base_isa = false);
+
+	
+	void exec_step();
+	
+	uint64_t _compute_and_get_current_cycles();
+	
+	void init(instr_memory_if *instr_mem, data_memory_if *data_mem, clint_if *clint, uint64_t entrypoint, uint64_t sp);
+
+	void trigger_external_interrupt(PrivilegeLevel level) override;
+
+	void clear_external_interrupt(PrivilegeLevel level) override;
+
+	void trigger_timer_interrupt(bool status) override;
+
+	void trigger_software_interrupt(bool status) override;
+	
+	
+	void sys_exit() override;
+	unsigned get_syscall_register_index() override;
+	uint64_t read_register(unsigned idx) override;
+	void write_register(unsigned idx, uint64_t value) override;
+
+    std::vector<uint64_t> get_registers(void) override;
 
 	Architecture get_architecture(void) override {
 		return RV64;
@@ -188,30 +280,9 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	void insert_breakpoint(uint64_t) override;
 	void remove_breakpoint(uint64_t) override;
-
-	void exec_step();
-
-	uint64_t _compute_and_get_current_cycles();
-
-	void init(instr_memory_if *instr_mem, data_memory_if *data_mem, clint_if *clint, uint64_t entrypoint, uint64_t sp);
-
-	void trigger_external_interrupt(PrivilegeLevel level) override;
-
-	void clear_external_interrupt(PrivilegeLevel level) override;
-
-	void trigger_timer_interrupt(bool status) override;
-
-	void trigger_software_interrupt(bool status) override;
-
-	void sys_exit() override;
-
-	uint64_t read_register(unsigned idx) override;
-
-	void write_register(unsigned idx, uint64_t value) override;
-
+	
 	uint64_t get_hart_id() override;
 
-	std::vector<uint64_t> get_registers(void) override;
 
 	void release_lr_sc_reservation() {
 		lr_sc_counter = 0;
@@ -224,6 +295,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	void fp_update_exception_flags();
 	void fp_setup_rm();
 	void fp_require_not_off();
+	bool prompt_enable_isa(uint32_t ext_mask);
+	bool prompt_allow_misaligned_access(uint64_t addr, bool isLoad, unsigned alignment);
 
 	uint64_t get_csr_value(uint64_t addr);
 
@@ -256,10 +329,25 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	template <unsigned Alignment, bool isLoad>
 	inline void trap_check_addr_alignment(uint64_t addr) {
 		if (unlikely(addr % Alignment)) {
+			if (allow_misaligned_access || prompt_allow_misaligned_access(addr, isLoad, Alignment))
+				return;
 			raise_trap(isLoad ? EXC_LOAD_ADDR_MISALIGNED : EXC_STORE_AMO_ADDR_MISALIGNED, addr);
 		}
 	}
 
+	inline void log_memory_store(uint64_t address, uint64_t apc){
+		//update entry and invalidate last load
+		memory_access_map[address] = {apc, 0};
+		last_memory_access = {address, AccessType::STORE};
+		last_memory_peripheral = resolve_peripheral(address);
+	}
+	inline void log_memory_read(uint64_t address, uint64_t apc){
+		//update entry and keep last write
+		std::get<1>(memory_access_map[address]) = apc;
+		last_memory_access = {address, AccessType::LOAD};
+		last_memory_peripheral = resolve_peripheral(address);
+	}
+	
 	inline void execute_amo_w(Instruction &instr, std::function<int32_t(int32_t, int32_t)> operation) {
 		uint64_t addr = regs[instr.rs1()];
 		trap_check_addr_alignment<4, false>(addr);
@@ -327,6 +415,18 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	void run_step() override;
 
 	void run() override;
+
+	void flush_ringbuffer();
+
+	void output_dot(std::streambuf *cout_save);
+	void output_csv(std::streambuf *cout_save);
+	void output_coverage_csv(const std::vector<Path>& sequences,
+			std::function<float(const ScoreParams)> score_function);
+	void output_json(std::streambuf *cout_save, 
+		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
+		std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists);
+	void output_full(std::streambuf *cout_save);
 
 	void show();
 };

@@ -10,6 +10,8 @@ struct iss_syscall_if {
 
 	virtual void sys_exit() = 0;
 
+	virtual unsigned get_syscall_register_index() = 0;
+
 	virtual uint64_t read_register(unsigned idx) = 0;
 	virtual void write_register(unsigned idx, uint64_t value) = 0;
 };

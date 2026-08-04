@@ -396,7 +396,8 @@ void InstructionNodeR::insert_rb(
 									access_type,
 									current_step->last_stack_pointer,
 									current_step->last_frame_pointer,
-									current_step->last_parameter
+									current_step->last_parameter,
+									current_step->last_peripheral_name
 									});
 			// inserted_nodes[i] = current_node;
 		}else{
@@ -410,7 +411,8 @@ void InstructionNodeR::insert_rb(
 			access_type,
 			current_step->last_stack_pointer,
 			current_step->last_frame_pointer,
-			current_step->last_parameter
+			current_step->last_parameter,
+			current_step->last_peripheral_name
 			}, 0); //depth is 0 as this is the root node
 		}
 	}
@@ -507,7 +509,8 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 								p.access_type,
 								p.stack_pointer,
 								p.frame_pointer,
-								p.parameter
+								p.parameter,
+								p.peripheral_name
 							}, p.depth);
 
 	return found_child;
@@ -1191,14 +1194,20 @@ MemoryNode::MemoryNode(bool is_store_instruction) : is_store(is_store_instructio
 
 void MemoryNode::register_access(uint64_t pc, uint64_t address, 
 	AccessType access_type, uint64_t prev_access, 
-				uint64_t stackpointer, uint64_t framepointer){
+				uint64_t stackpointer, uint64_t framepointer, const char* peripheral_name){
 	uint64_t access_offset = abs((long int)(address-last_access));
 	access_offset_sum += access_offset;
 	int64_t accessor_diff = 0; 
 	accessor_diff = prev_access - last_access;
 
 	Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;
-	if(framepointer>0 && address <= framepointer && address >= stackpointer){
+	if(peripheral_name != nullptr){
+		//address hit a registered peripheral region - classify as PERIPHERAL instead of the stack/heap/frame heuristic
+		memory_location = memory_location | MemoryRegion::PERIPHERAL;
+		std::string name(peripheral_name);
+		peripheral_by_address[address] = name;
+		peripheral_access_counts[name]++;
+	}else if(framepointer>0 && address <= framepointer && address >= stackpointer){
 		//address is in Frame
 		memory_location = memory_location | MemoryRegion::FRAME;
 	}else{
@@ -1337,7 +1346,15 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 
 void InstructionNodeMemory::update_weight(const StepUpdateInfo& p, uint32_t depth){
 	InstructionNode::update_weight(p, depth);
-	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer);
+	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer, p.peripheral_name);
+}
+
+std::vector<PathNode> InstructionNodeMemory::path_to_path_nodes(Path path, uint depth){
+	std::vector<PathNode> nodes = InstructionNodeR::path_to_path_nodes(path, depth);
+	if(!nodes.empty()){
+		nodes.front().extra_fields = MemoryNode::memory_to_json();
+	}
+	return nodes;
 }
 
 InstructionNodeMemoryLeaf::InstructionNodeMemoryLeaf(Mapping instruction, uint64_t parent_hash, uint64_t pc, 
@@ -1353,8 +1370,16 @@ void InstructionNodeMemoryLeaf::_print(uint8_t level){
 
 void InstructionNodeMemoryLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
 	InstructionNode::update_weight(p, depth);
-	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer);
+	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer, p.peripheral_name);
 	pc_map[p.pc]++;
+}
+
+std::vector<PathNode> InstructionNodeMemoryLeaf::path_to_path_nodes(Path path, uint depth){
+	std::vector<PathNode> nodes = InstructionNode::path_to_path_nodes(path, depth);
+	if(!nodes.empty()){
+		nodes.front().extra_fields = MemoryNode::memory_to_json();
+	}
+	return nodes;
 }
 
 std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, const char* parent_name,
@@ -1653,6 +1678,8 @@ nlohmann::json PathNode::to_json(){
         jsonNode["dependencies_anti"] = jsonDependencies2;
 		nlohmann::json jsonDependencies3 = output_dependencies;
         jsonNode["dependencies_output"] = jsonDependencies3;
+
+		jsonNode.update(extra_fields);
 
 		return jsonNode;
 

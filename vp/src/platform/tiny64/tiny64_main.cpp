@@ -7,7 +7,7 @@
 #include "iss.h"
 #include "mem.h"
 #include "memory.h"
-#include "mmu.h"
+// #include "mmu.h"
 #include "syscall.h"
 #include "platform/common/options.h"
 
@@ -26,7 +26,7 @@ struct TinyOptions : public Options {
 public:
 	typedef unsigned int addr_t;
 
-	addr_t mem_size = 1024 * 1024 * 32;  // 32 MB ram, to place it before the CLINT and run the base examples (assume
+	addr_t mem_size = 1024u * 1024u * 128u;  // 128 MB ram, to place it before the CLINT and run the base examples (assume
 	                                     // memory start at zero) without modifications
 	addr_t mem_start_addr = 0x00000000;
 	addr_t mem_end_addr = mem_start_addr + mem_size - 1;
@@ -58,9 +58,9 @@ int sc_main(int argc, char **argv) {
 
 	tlm::tlm_global_quantum::instance().set(sc_core::sc_time(opt.tlm_global_quantum, sc_core::SC_NS));
 
-	ISS core(0);
+	ISS core(0, opt.output_file.c_str(), opt.input_program.c_str(), opt.input_hash_list, opt.use_E_base_isa);
 	MMU mmu(core);
-	CombinedMemoryInterface core_mem_if("MemoryInterface0", core, mmu);
+	CombinedMemoryInterface core_mem_if("MemoryInterface0", core, &mmu);
 	SimpleMemory mem("SimpleMemory", opt.mem_size);
 	ELFLoader loader(opt.input_program.c_str());
 	SimpleBus<2, 3> bus("SimpleBus");
@@ -75,7 +75,7 @@ int sc_main(int argc, char **argv) {
 
 	std::shared_ptr<BusLock> bus_lock = std::make_shared<BusLock>();
 	core_mem_if.bus_lock = bus_lock;
-	mmu.mem = &core_mem_if;
+	//mmu.mem = &core_mem_if; //TODO check why this was in the 64bit version
 
 	instr_memory_if *instr_mem_if = &core_mem_if;
 	data_memory_if *data_mem_if = &core_mem_if;
@@ -84,6 +84,7 @@ int sc_main(int argc, char **argv) {
 	if (opt.use_data_dmi) {
 		core_mem_if.dmi_ranges.emplace_back(dmi);
 	}
+	
 
 	loader.load_executable_image(mem, mem.size, opt.mem_start_addr);
 	core.init(instr_mem_if, data_mem_if, &clint, loader.get_entrypoint(), rv64_align_address(opt.mem_end_addr));
@@ -92,7 +93,18 @@ int sc_main(int argc, char **argv) {
 
 	if (opt.intercept_syscalls)
 		core.sys = &sys;
+	core.error_on_zero_traphandler = opt.error_on_zero_traphandler;
+
+	core.output_as_dot = opt.output_as_dot;
+	core.output_as_csv = opt.output_as_csv;
+	core.output_as_json = opt.output_as_json;
+	core.output_full_export = opt.output_full_export;
+	core.interactive_mode = opt.interactive_mode;
 	core.suppress_prompts = opt.suppress_prompts;
+	core.coverage_csv_file = opt.coverage_csv_file;
+	core.coverage_top_n = opt.top_n;
+	core.coverage_similarity_threshold = opt.similarity_threshold;
+	core.output_coverage_csv_enabled = !opt.coverage_csv_file.empty();
 
 	// setup port mapping
 	bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

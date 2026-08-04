@@ -446,7 +446,8 @@ enum class MemoryRegion {
 	FRAME = 1,
 	STACK = 2,
 	HEAP = 4,
-	OTHER = 8
+	OTHER = 8,
+	PERIPHERAL = 16
 };
 inline MemoryRegion operator|(MemoryRegion a, MemoryRegion b)
 {
