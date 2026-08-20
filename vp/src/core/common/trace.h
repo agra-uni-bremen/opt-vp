@@ -993,8 +993,10 @@ class MemoryNode{
 			json["LS"] = is_store;
 			json["Accesses"] = memory_accesses;
 			json["OffsetSum"] = access_offset_sum;
-			json["Peripherals"] = peripheral_by_address;
-			json["PeripheralAccessCounts"] = peripheral_access_counts;
+			if(peripheral_access_counts.size()>0){
+				json["Peripherals"] = peripheral_by_address;
+				json["PeripheralAccessCounts"] = peripheral_access_counts;
+			}
 			return json;
 		};
 
