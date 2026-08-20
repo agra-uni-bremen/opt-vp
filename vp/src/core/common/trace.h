@@ -15,6 +15,12 @@
 #ifndef INSTRUCTION_TREE_DEPTH
 #define INSTRUCTION_TREE_DEPTH 20
 #endif
+//version of the exported trace format, written into every exported tree.
+//bump the minor version when fields are added, the major version when existing fields change meaning
+//1.2: predecessor pcs per register_sets entry, immediates for every instruction that carries one,
+//     real branch directions/offsets and per pc taken/not-taken counts
+#define TRACE_FORMAT_VERSION "1.2"
+
 #define JSON_INDENT -1
 #define SIMILARITY_ALGORITHM 1 //1 for jaccard, 2 for levenshtein
 #define MAX_VARIANTS 3
@@ -43,6 +49,10 @@
 //per pc for most of the program -> noticeably larger traces. Disable with -DNO_TRACE_PARAMETER_IMMEDIATES
 #ifndef NO_TRACE_PARAMETER_IMMEDIATES
 #define trace_parameter_immediates
+#endif
+
+#if defined(trace_parameter) && !defined(trace_individual_registers)
+#error "trace_parameter stores its values in the per pc register set entries, it needs trace_individual_registers"
 #endif
 
 //record which pc preceded each register_sets entry in the same dynamic execution.
@@ -155,29 +165,32 @@ inline int64_t decode_traced_immediate(Opcode::Mapping op, Instruction& instr) {
 	}
 }
 
+//one entry of the ring buffer of recently executed instructions.
+//every member is initialized: the buffer is only partially filled during the first steps and the
+//code detects that by checking for a zero opcode
 struct ExecutionInfo {
-	Opcode::Mapping last_executed_instruction;
-	uint64_t last_cycles;
-	uint8_t last_powermode;
+	Opcode::Mapping last_executed_instruction = Opcode::UNDEF;
+	uint64_t last_cycles = 0;
+	uint8_t last_powermode = 0;
 
-	std::tuple<uint16_t,uint16_t,uint16_t> last_registers;
-	uint64_t last_executed_pc;
+	std::tuple<uint16_t,uint16_t,uint16_t> last_registers = {0,0,0};
+	uint64_t last_executed_pc = 0;
 	//pc of the instruction executed directly before this one (0 if unknown, e.g. first step)
 	uint64_t last_predecessor_pc = 0;
 
-	uint64_t last_memory_read;
-	uint64_t last_memory_written;
-	AccessType last_memory_access_type;
-	uint64_t last_stack_pointer;
-	uint64_t last_frame_pointer;
+	uint64_t last_memory_read = 0;
+	uint64_t last_memory_written = 0;
+	AccessType last_memory_access_type = AccessType::NONE;
+	uint64_t last_stack_pointer = 0;
+	uint64_t last_frame_pointer = 0;
 	const char* last_peripheral_name = nullptr;
 
-	int64_t last_parameter;
+	int64_t last_parameter = NO_PARAMETER;
 	//actual outcome of a branch/jump and its encoded offset (I_imm for JALR, as its target is dynamic)
 	BranchOutcome last_branch_outcome = BranchOutcome::NONE;
 	int64_t last_branch_offset = 0;
 
-	uint64_t last_step_id;
+	uint64_t last_step_id = 0;
 };
 
 struct StepInsertInfo {
@@ -403,6 +416,14 @@ struct RegisterSet
 	RegisterSet(int8_t rs1, int8_t rs2, int8_t rd)
         : rs1(rs1), rs2(rs2), rd(rd) {}
 };
+#ifdef trace_parameter
+//one traced parameter value of a pc and how often it was seen with that value
+struct ParameterCounter {
+	int64_t value;
+	uint64_t count;
+};
+#endif
+
 struct RegisterSetCounter {
 	int count;
 	RegisterSet regset;
@@ -410,8 +431,25 @@ struct RegisterSetCounter {
 	//pc this entry was reached from -> how often. A node usually has one or two distinct predecessors
 	std::map<uint64_t, uint64_t> predecessors;
 	#endif
+	#ifdef trace_parameter
+	//parameter values seen at this pc. Almost always a single entry (a constant immediate), so a
+	//linear scan is cheaper than hashing, and it shares the lookup of the register set entry
+	std::vector<ParameterCounter> parameters;
+	#endif
 	RegisterSetCounter(int8_t rs1, int8_t rs2, int8_t rd)
 		: count(1), regset(rs1, rs2, rd) {}
+
+	#ifdef trace_parameter
+	void count_parameter(int64_t value){
+		for (ParameterCounter& entry : parameters) {
+			if(entry.value == value){
+				entry.count++;
+				return;
+			}
+		}
+		parameters.push_back({value, 1});
+	}
+	#endif
 };
 
 uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash);
@@ -425,11 +463,6 @@ class InstructionNode{
 		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash)
 				: instruction(instruction), weight(0){
 					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
-					// for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
-					// {
-					// 	dependencies_true_[i] = false;
-					// }
-					
 		}
 
 		Opcode::Mapping instruction;
@@ -447,9 +480,6 @@ class InstructionNode{
 		//true weight is updated if current step id > last_occurrence + depth
 		uint64_t last_occurrence = 0;
 
-		//pc -> (parameter value -> how often this value was seen at that pc)
-		std::unordered_map<uint64_t, std::unordered_map<int64_t, uint64_t>> parameters;
-
 		uint64_t total_cycles = 0;
 		//sum of the step ids this node occurred in
 		//dividing by weight results in the average region of the programs lifetime this node occurs most frequently
@@ -457,7 +487,9 @@ class InstructionNode{
 		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
 		//array of negative offsets to last node that writes to rs1 or rs2 (1=this node depends on tree[current-index])
 		//very likely this only marks 2 values for longer (unique) paths
-		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_; //value at offset 0 is ignored
+		//must be zero initialized here: a node is created with new, which leaves a plain member
+		//array indeterminate, and the garbage shows up as dependencies that never occurred
+		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_ = {}; //value at offset 0 is ignored
 		//index of other nodes this node has a anti/output dependency to
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_output_;
@@ -705,7 +737,19 @@ class InstructionNode{
 			jsonNode["occurrence"] = occurrence;
 			
 			#ifdef trace_parameter
-			jsonNode["parameters"] = parameters;
+			//same shape as before the values moved into register_sets: [[pc, [[value, count], ...]], ...]
+			nlohmann::json jsonParameters = nlohmann::json::array();
+			for (const auto& entry : register_sets) {
+				if(entry.second.parameters.empty()){
+					continue;
+				}
+				nlohmann::json jsonValues = nlohmann::json::array();
+				for (const ParameterCounter& value : entry.second.parameters) {
+					jsonValues.push_back({value.value, value.count});
+				}
+				jsonParameters.push_back({entry.first, jsonValues});
+			}
+			jsonNode["parameters"] = jsonParameters;
 			#endif
 
 			return jsonNode;
@@ -825,21 +869,9 @@ class InstructionNode{
 				last_occurrence = p.step;
 			}
 
-			#ifdef trace_parameter
-			//record the value the ISS decoded for this instruction: shift amount, branch/jump target or,
-			//with trace_parameter_immediates, the decoded immediate. Values may be negative.
-			#ifndef trace_root_parameters
-			//tracking the root node costs one entry per pc executing this opcode with little benefit
-			if(depth > 0)
-			#endif
-			{
-				if (p.parameter != NO_PARAMETER) {
-					parameters[p.pc][p.parameter]++; //increment count for this parameter value
-				}
-			}
-			#endif
-
 			#ifdef trace_individual_registers
+			//everything that is tracked per pc shares this single lookup, it runs for every node of
+			//every executed instruction
 			auto it = register_sets.find(p.pc);
 			if(it == register_sets.end()) {
 				it = register_sets.emplace(p.pc, RegisterSetCounter{static_cast<int8_t>(p.rs1), static_cast<int8_t>(p.rs2), static_cast<int8_t>(p.rd)}).first;
@@ -849,6 +881,18 @@ class InstructionNode{
 			#ifdef trace_predecessor_pcs
 			//which pc this occurrence was actually reached from, so later, a pc path can be proven instead of guessed
 			it->second.predecessors[p.predecessor_pc]++;
+			#endif
+			#ifdef trace_parameter
+			//record the value the ISS decoded for this instruction: shift amount, branch/jump target or,
+			//with trace_parameter_immediates, the decoded immediate. Values may be negative.
+			if (p.parameter != NO_PARAMETER
+					#ifndef trace_root_parameters
+					//tracking the root node costs one entry per pc executing this opcode with little benefit
+					&& depth > 0
+					#endif
+				) {
+				it->second.count_parameter(p.parameter);
+			}
 			#endif
 			#endif
 			#ifdef handle_self_modifying_code
@@ -981,9 +1025,11 @@ class InstructionNodeR : virtual public InstructionNode{
 
 		std::list<InstructionNode*> children;
 
-		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
+		//the ring buffer is only read, so it is passed by reference: it is copied once per executed
+		//instruction otherwise, which is 120 bytes per tree depth step
+		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
 						uint32_t next_rb_index);
-		void insert_rb(std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_instructions, 
+		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
 						uint32_t next_rb_index, uint32_t offset);
 
 		InstructionNode* insert(const StepInsertInfo& p) override;

@@ -1508,7 +1508,7 @@ void ISS::exec_step() {
 		last_executed_steps[ring_buffer_index].last_executed_pc = last_pc;
 		//the entry written in the previous step is still in the slot before this one
 		last_executed_steps[ring_buffer_index].last_predecessor_pc =
-			last_executed_steps[(ring_buffer_index + trace_depth - 1) % trace_depth].last_executed_pc;
+			last_executed_steps[ring_buffer_index > 0 ? ring_buffer_index - 1 : trace_depth - 1].last_executed_pc;
 		last_executed_steps[ring_buffer_index].last_powermode = 0; //TODO
 		last_executed_steps[ring_buffer_index].last_memory_read = 0;
 		last_executed_steps[ring_buffer_index].last_memory_written = 0;
@@ -1547,7 +1547,10 @@ void ISS::exec_step() {
 //-------------------------------------------------------------------------
 	//updating ringbuffer done
 	//update index
-	ring_buffer_index = (ring_buffer_index+1)%trace_depth;
+	//wrap by comparison instead of a division: this runs for every executed instruction
+	if(++ring_buffer_index >= trace_depth){
+		ring_buffer_index = 0;
+	}
 
 }
 
@@ -2690,7 +2693,7 @@ void ISS::output_full(std::streambuf *cout_save){
 	std::string single_output_filename = "";
 	uint64_t index = 0;
 	for (InstructionNodeR& tree : instruction_trees){
-		nlohmann::ordered_json tree_json_array = nlohmann::ordered_json::array();
+		nlohmann::ordered_json tree_json_array = nlohmann::ordered_json::object();
 		std::string file_path = std::string(input_filename);
 		std::string application_name = file_path.substr(file_path.find_last_of("/\\")+1);
 		single_output_filename = output_filename + application_name +
@@ -2699,7 +2702,9 @@ void ISS::output_full(std::streambuf *cout_save){
 
 		output = std::ofstream(single_output_filename);
 		std::cout.rdbuf(output.rdbuf());
-		tree_json_array = tree.to_json();
+		//the format version goes first so a reader can dispatch on it before parsing the tree
+		tree_json_array["format_version"] = TRACE_FORMAT_VERSION;
+		tree_json_array.update(tree.to_json());
 		std::string json_string = tree_json_array.dump(JSON_INDENT);
 		std::cout << json_string << std::endl;
 		index++;

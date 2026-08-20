@@ -72,6 +72,9 @@ Additional arguments include
 
 ### :package: Trace contents
 
+Every exported tree starts with a `format_version` (current: `1.2`). The minor version is bumped
+when fields are added, the major version when existing fields change meaning. It is defined as `TRACE_FORMAT_VERSION` in `vp/src/core/common/trace.h`.
+
 Every node of an exported tree carries, next to its weight and dependencies:
 
 * `register_sets`: per program counter the registers used at that pc (`rs1`, `rs2`, `rd`), how often
@@ -100,6 +103,7 @@ $ cmake -S vp -B vp/build -DINSTRUCTION_TREE_DEPTH=8
 | Option | Effect |
 | --- | --- |
 | `-DINSTRUCTION_TREE_DEPTH=<n>` | maximum sequence length (default 20). `--trace-depth` can lower it at runtime |
+| `-DCMAKE_BUILD_TYPE=Release` | not a trace option, but tracing is roughly 4x faster than the default Debug build |
 | `-DNO_TRACE_PARAMETER_IMMEDIATES=ON` | do not record decoded immediates |
 | `-DNO_TRACE_PREDECESSOR_PCS=ON` | do not record predecessor pcs |
 | `-DNO_TRACE_BRANCH_OUTCOMES=ON` | do not record per pc branch outcomes |

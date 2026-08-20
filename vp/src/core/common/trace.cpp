@@ -63,13 +63,16 @@ InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_
 }
 
 void InstructionNodeR::insert_rb(
-				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps_p, 
+				const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_steps_p, 
 				uint32_t next_rb_index){
 					insert_rb(last_executed_steps_p, next_rb_index, 0);
 				}
 void InstructionNodeR::insert_rb(
-				std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps_p, 
+				const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_steps_p, 
 				uint32_t next_rb_index, uint32_t offset){
+	//keep the runtime depth in a local: it can not change while a sequence is inserted, but the
+	//compiler has to assume the global could be written by any of the calls in the loop below
+	const uint32_t depth = trace_depth;
 	//printf("insert instructions from ringbuffer with len %ld\n", last_executed_instructions.size());
 	
 	//insert each element of the ringbuffer in order into the tree
@@ -95,7 +98,7 @@ void InstructionNodeR::insert_rb(
 	}
 
 	if(load_store_dirty){
-		for(size_t i = 0; i < trace_depth; i++) {
+		for(size_t i = 0; i < depth; i++) {
 			memory_load[i] = 0;
 			memory_store[i] = 0;
 			load_store_dirty = false;
@@ -113,10 +116,15 @@ void InstructionNodeR::insert_rb(
 	printf("---------------\nChecking dependencies\n---------------\n");
 	#endif
 
-	for (uint32_t i = 0; i < trace_depth-offset; i++)//update the root node and insert all other nodes
+	//walk the ring buffer from the oldest entry, wrapping around by subtraction instead of a
+	//division: the index is always < 2*depth here
+	uint32_t rb_index = next_rb_index;
+	for (uint32_t i = 0; i < depth-offset; i++)//update the root node and insert all other nodes
 	{
-		uint8_t rb_index = (next_rb_index+i)%trace_depth;
-		ExecutionInfo* current_step = &last_executed_steps_p[rb_index];// [rb_index];
+		const ExecutionInfo* current_step = &last_executed_steps_p[rb_index];
+		if(++rb_index >= depth){
+			rb_index = 0;
+		}
 		if(current_step->last_executed_instruction==Opcode::UNDEF){
 			printf("[WARNING] trying to insert zero opcode into tree at index %d with offset %d\n", i, offset);
 		}
