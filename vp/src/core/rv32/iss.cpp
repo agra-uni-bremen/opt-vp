@@ -196,7 +196,7 @@ void ISS::exec_step() {
 		// colored progress output (ANSI colors)
 		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%lu\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
 		for (int i = 0; i < 5; ++i) {
-			int idx = (ring_buffer_index + INSTRUCTION_TREE_DEPTH - i) % INSTRUCTION_TREE_DEPTH;
+			int idx = (ring_buffer_index + trace_depth - i) % trace_depth;
 			auto &step = last_executed_steps[idx];
 			printf("  PC: \x1b[33m0x%08lx\x1b[0m, Opcode: \x1b[35m%s\x1b[0m\n",
 				   step.last_executed_pc,
@@ -243,7 +243,7 @@ void ISS::exec_step() {
 // //-------------------------------------------------------------------------
 // 	//updating ringbuffer done
 // 	//update index
-// 	ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
+// 	ring_buffer_index = (ring_buffer_index+1)%trace_depth;
 
 	//insert into tree of oldest instruction, which will be overwritten in the next step
 	Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;
@@ -311,7 +311,9 @@ void ISS::exec_step() {
 
 		//printf("OP: %s\n", Opcode::mappingStr[op]);
 	#ifdef trace_parameter
-	int64_t last_parameter = -1;
+	int64_t last_parameter = NO_PARAMETER;
+	BranchOutcome last_branch_outcome = BranchOutcome::NONE;
+	int64_t last_branch_offset = 0;
 	#endif
 
 	switch (op) {
@@ -440,6 +442,8 @@ void ISS::exec_step() {
 			regs[instr.rd()] = link;
 			#ifdef trace_parameter
 			last_parameter = pc;
+			last_branch_offset = instr.J_imm();
+			last_branch_outcome = BranchOutcome::TAKEN;
 			#endif
 		} break;
 
@@ -450,6 +454,8 @@ void ISS::exec_step() {
 			regs[instr.rd()] = link;
 			#ifdef trace_parameter
 			last_parameter = pc;
+			last_branch_offset = instr.I_imm(); //offset relative to rs1, the target itself is dynamic
+			last_branch_outcome = BranchOutcome::TAKEN;
 			#endif
 		} break;
 
@@ -508,61 +514,91 @@ void ISS::exec_step() {
 		} break;
 
 		case Opcode::BEQ:
+			#ifdef trace_parameter
+			last_branch_offset = instr.B_imm();
+			last_branch_outcome = BranchOutcome::NOT_TAKEN;
+			#endif
 			if (regs[instr.rs1()] == regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
 				#ifdef trace_parameter
 				last_parameter = pc;
+				last_branch_outcome = BranchOutcome::TAKEN;
 				#endif
 			}
 			break;
 
 		case Opcode::BNE:
+			#ifdef trace_parameter
+			last_branch_offset = instr.B_imm();
+			last_branch_outcome = BranchOutcome::NOT_TAKEN;
+			#endif
 			if (regs[instr.rs1()] != regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
 				#ifdef trace_parameter
 				last_parameter = pc;
+				last_branch_outcome = BranchOutcome::TAKEN;
 				#endif
 			}
 			break;
 
 		case Opcode::BLT:
+			#ifdef trace_parameter
+			last_branch_offset = instr.B_imm();
+			last_branch_outcome = BranchOutcome::NOT_TAKEN;
+			#endif
 			if (regs[instr.rs1()] < regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
 				#ifdef trace_parameter
 				last_parameter = pc;
+				last_branch_outcome = BranchOutcome::TAKEN;
 				#endif
 			}
 			break;
 
 		case Opcode::BGE:
+			#ifdef trace_parameter
+			last_branch_offset = instr.B_imm();
+			last_branch_outcome = BranchOutcome::NOT_TAKEN;
+			#endif
 			if (regs[instr.rs1()] >= regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
 				#ifdef trace_parameter
 				last_parameter = pc;
+				last_branch_outcome = BranchOutcome::TAKEN;
 				#endif
 			}
 			break;
 
 		case Opcode::BLTU:
+			#ifdef trace_parameter
+			last_branch_offset = instr.B_imm();
+			last_branch_outcome = BranchOutcome::NOT_TAKEN;
+			#endif
 			if ((uint32_t)regs[instr.rs1()] < (uint32_t)regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
 				#ifdef trace_parameter
 				last_parameter = pc;
+				last_branch_outcome = BranchOutcome::TAKEN;
 				#endif
 			}
 			break;
 
 		case Opcode::BGEU:
+			#ifdef trace_parameter
+			last_branch_offset = instr.B_imm();
+			last_branch_outcome = BranchOutcome::NOT_TAKEN;
+			#endif
 			if ((uint32_t)regs[instr.rs1()] >= (uint32_t)regs[instr.rs2()]) {
 				pc = last_pc + instr.B_imm();
 				trap_check_pc_alignment();
 				#ifdef trace_parameter
 				last_parameter = pc;
+				last_branch_outcome = BranchOutcome::TAKEN;
 				#endif
 			}
 			break;
@@ -1376,6 +1412,13 @@ void ISS::exec_step() {
             throw std::runtime_error("unknown opcode");
 	}
 
+	#ifdef trace_parameter_immediates
+	//instructions that did not set a parameter above may still carry an immediate (ADDI, ANDI, LUI, load/store offset, ...)
+	if(last_parameter == NO_PARAMETER){
+		last_parameter = decode_traced_immediate(op, instr);
+	}
+	#endif
+
 //---------------------------------------------------------------------------------
 //                             save instruction info of last execution
 //---------------------------------------------------------------------------------
@@ -1383,6 +1426,9 @@ void ISS::exec_step() {
 		last_executed_steps[ring_buffer_index].last_cycles = cycles_diff;
 		last_executed_steps[ring_buffer_index].last_registers = {RS1,RS2,RD};
 		last_executed_steps[ring_buffer_index].last_executed_pc = last_pc;
+		//the entry written in the previous step is still in the slot before this one
+		last_executed_steps[ring_buffer_index].last_predecessor_pc =
+			last_executed_steps[(ring_buffer_index + trace_depth - 1) % trace_depth].last_executed_pc;
 		last_executed_steps[ring_buffer_index].last_powermode = 0; //TODO
 		last_executed_steps[ring_buffer_index].last_memory_read = 0;
 		last_executed_steps[ring_buffer_index].last_memory_written = 0;
@@ -1390,6 +1436,8 @@ void ISS::exec_step() {
 		last_executed_steps[ring_buffer_index].last_stack_pointer = regs[RegFile::sp];
 		last_executed_steps[ring_buffer_index].last_frame_pointer = regs[RegFile::fp];
 		last_executed_steps[ring_buffer_index].last_parameter = last_parameter;
+		last_executed_steps[ring_buffer_index].last_branch_outcome = last_branch_outcome;
+		last_executed_steps[ring_buffer_index].last_branch_offset = last_branch_offset;
 		last_executed_steps[ring_buffer_index].last_peripheral_name = last_memory_peripheral;
 
 		last_executed_steps[ring_buffer_index].last_memory_access_type = std::get<1>(last_memory_access);
@@ -1420,7 +1468,7 @@ void ISS::exec_step() {
 //-------------------------------------------------------------------------
 	//updating ringbuffer done
 	//update index
-	ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
+	ring_buffer_index = (ring_buffer_index+1)%trace_depth;
 
 }
 
@@ -2241,9 +2289,9 @@ void ISS::run() {
 }
 
 void ISS::flush_ringbuffer(){
-	for (size_t offset = 1; offset < INSTRUCTION_TREE_DEPTH; offset++) //TODO check if this has to start at index 0
+	for (size_t offset = 1; offset < trace_depth; offset++) //TODO check if this has to start at index 0
 	{
-		ring_buffer_index = (ring_buffer_index+1)%INSTRUCTION_TREE_DEPTH;
+		ring_buffer_index = (ring_buffer_index+1)%trace_depth;
 
 		//advance ringbuffer index and insert current instruction into tree (as if it were the oldest entry)
 		Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;

@@ -19,6 +19,8 @@ public:
 	float similarity_threshold = 0.2f;
 
 	std::vector<uint64_t> input_hash_list;
+	//effective instruction tree depth, 0 = use the depth the VP was compiled with
+	unsigned int instruction_tree_depth = 0;
 	float reduce_graph_output = 0.0;
 	bool output_as_dot = false;
 	bool output_as_json = false;

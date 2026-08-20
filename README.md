@@ -68,11 +68,47 @@ Additional arguments include
 * `--dot` to output dot files for the internal trees
 * `--seq` to output the best sequences used in [opt-seq](https://github.com/agra-uni-bremen/opt-seq)
 * `-i` to enter interactive mode after the simulation has finished
+* `--trace-depth <n>` to shorten the traced sequences (default and maximum: the compiled tree depth)
+
+### :package: Trace contents
+
+Every node of an exported tree carries, next to its weight and dependencies:
+
+* `register_sets`: per program counter the registers used at that pc (`rs1`, `rs2`, `rd`), how often
+  it was reached (`count`) and, per predecessor pc, how often it was reached *from* that pc
+  (`predecessors`). The predecessors make the pc path through a sequence provable later.
+* `parameters`: per program counter the values the instruction was executed with, as
+  `[[pc, [[value, count], ...]], ...]`. This is the shift amount for shifts, the target pc for taken
+  branches and jumps, and the decoded immediate for every other instruction that carries one
+  (`ADDI`, `ANDI`, `LUI`, load/store offsets, ...). Values are signed 64 bit.
+* Branch and jump nodes additionally carry `BranchOutcomes`: per program counter the encoded
+  `offset` and how often the branch was `taken`/`not_taken`. `JALR` reports its `I_imm`, which is
+  relative to `rs1` rather than to the pc, and is therefore not included in the pc relative
+  `Direction`/`offsets` summary.
+* Load and store nodes additionally carry their accesses, offset sum and, if a registered peripheral
+  was hit, the peripheral names.
+
+### :hammer: Build options
+
+The tree depth and the optional parts of the trace are fixed at compile time, because the nodes keep
+static arrays for them:
+
+```console
+$ cmake -S vp -B vp/build -DINSTRUCTION_TREE_DEPTH=8
+```
+
+| Option | Effect |
+| --- | --- |
+| `-DINSTRUCTION_TREE_DEPTH=<n>` | maximum sequence length (default 20). `--trace-depth` can lower it at runtime |
+| `-DNO_TRACE_PARAMETER_IMMEDIATES=ON` | do not record decoded immediates |
+| `-DNO_TRACE_PREDECESSOR_PCS=ON` | do not record predecessor pcs |
+| `-DNO_TRACE_BRANCH_OUTCOMES=ON` | do not record per pc branch outcomes |
+| `-DTRACE_ROOT_PARAMETERS=ON` | also record parameters on the root node of each tree |
 
 ## Publications  
 The concepts behind the Opt-VP are further described in the following publications:  
 #### [Paper introducing the VP](https://ieeexplore.ieee.org/abstract/document/10272131)  
-#### [Extended Abstract for latest results](https://riscv-europe.org/summit/2025/media/proceedings/2025-05-13-RISC-V-Summit-Europe-P1.1.07-ZIELASKO-abstract.pdf)  
+#### [Paper with latest results](https://ieeexplore.ieee.org/abstract/document/11539431/)  
 
    
 #### Acknowledgements:

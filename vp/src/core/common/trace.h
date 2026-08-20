@@ -10,7 +10,11 @@
 
 #include "lib/json/single_include/nlohmann/json.hpp"
 
-#define INSTRUCTION_TREE_DEPTH 6
+//maximum tree depth. Fixed at compile time so nodes can keep static arrays/bitsets.
+//override from the build system with -DINSTRUCTION_TREE_DEPTH=<n>
+#ifndef INSTRUCTION_TREE_DEPTH
+#define INSTRUCTION_TREE_DEPTH 20
+#endif
 #define JSON_INDENT -1
 #define SIMILARITY_ALGORITHM 1 //1 for jaccard, 2 for levenshtein
 #define MAX_VARIANTS 3
@@ -32,9 +36,42 @@
 //#define debug_dependencies
 // #define handle_self_modifying_code
 #define trace_individual_registers
-#define trace_parameter //trace instruction parameters like shift amount
+#define trace_parameter //trace instruction parameters like shift amount and branch/jump targets
+
+//trace the decoded immediate of every instruction that carries one (ADDI, ANDI, LUI, load/store offsets, ...)
+//this is what allows constant folding of immediates on the analysis side, but it adds one parameter entry
+//per pc for most of the program -> noticeably larger traces. Disable with -DNO_TRACE_PARAMETER_IMMEDIATES
+#ifndef NO_TRACE_PARAMETER_IMMEDIATES
+#define trace_parameter_immediates
+#endif
+
+//record which pc preceded each register_sets entry in the same dynamic execution.
+//needed to prove (instead of guess) the pc path through a sequence. Disable with -DNO_TRACE_PREDECESSOR_PCS
+#ifndef NO_TRACE_PREDECESSOR_PCS
+#define trace_predecessor_pcs
+#endif
+
+//record the real taken/not-taken counts and branch offsets per pc for branch/jump nodes
+//disable with -DNO_TRACE_BRANCH_OUTCOMES
+#ifndef NO_TRACE_BRANCH_OUTCOMES
+#define trace_branch_outcomes
+#endif
+
+//also track parameters on the root node of a tree. Costs one entry per pc executing that opcode
+//(the root of a tree is reached by every occurrence of its instruction), so it is off by default.
+//enable with -DTRACE_ROOT_PARAMETERS
+#ifdef TRACE_ROOT_PARAMETERS
+#define trace_root_parameters
+#endif
 
 //#define dot_pc_on_pruned_nodes
+
+//effective tree depth used at runtime, always <= INSTRUCTION_TREE_DEPTH (see --trace-depth).
+//node storage is sized by INSTRUCTION_TREE_DEPTH, only the first trace_depth entries are used.
+extern uint32_t trace_depth;
+//clamps to [2, INSTRUCTION_TREE_DEPTH] and warns if the requested depth is out of range.
+//a depth of 0 keeps the compiled default. Must be called before the first instruction is traced.
+void set_trace_depth(uint32_t depth);
 
 // extern std::array<const char*, NUMBER_OF_INSTRUCTIONS> mappingStr;
 
@@ -70,7 +107,53 @@ enum class AccessType {
 	STORE=2
 };
 
+enum class BranchOutcome : uint8_t {
+	NONE=0, //not a branch/jump
+	TAKEN=1,
+	NOT_TAKEN=2
+};
+
 InstructionType getInstructionType(Opcode::Mapping mapping);
+
+//sentinel for "this instruction did not produce a traced parameter"
+//parameters are signed (negative immediates, branch targets above 2 GiB), so 0/-1 can not be used
+constexpr int64_t NO_PARAMETER = INT64_MIN;
+
+//decoded immediate of an instruction, or NO_PARAMETER if it does not carry one.
+//branches and jumps are excluded on purpose: their parameter slot holds the actual target pc
+//(see the ISS), and the encoded offset is reported through the branch outcome instead.
+inline int64_t decode_traced_immediate(Opcode::Mapping op, Instruction& instr) {
+	using namespace Opcode;
+	switch (op) {
+		//shift amounts live in the immediate field
+		case SLLI:
+		case SRLI:
+		case SRAI:
+			return instr.shamt();
+		case SLLIW:
+		case SRLIW:
+		case SRAIW:
+			return instr.shamt_w();
+		//target pc is traced instead of the encoded offset
+		case JAL:
+		case JALR:
+			return NO_PARAMETER;
+		default:
+			break;
+	}
+	switch (getType(op)) {
+		case Type::I:
+			return instr.I_imm();
+		case Type::S:
+			return instr.S_imm();
+		case Type::U:
+			return instr.U_imm();
+		default:
+			//R/R4 have no immediate, B is covered by the branch target/outcome,
+			//UNKNOWN covers CSR, FENCE, ECALL, ... where the field is not an immediate
+			return NO_PARAMETER;
+	}
+}
 
 struct ExecutionInfo {
 	Opcode::Mapping last_executed_instruction;
@@ -79,6 +162,8 @@ struct ExecutionInfo {
 
 	std::tuple<uint16_t,uint16_t,uint16_t> last_registers;
 	uint64_t last_executed_pc;
+	//pc of the instruction executed directly before this one (0 if unknown, e.g. first step)
+	uint64_t last_predecessor_pc = 0;
 
 	uint64_t last_memory_read;
 	uint64_t last_memory_written;
@@ -87,8 +172,11 @@ struct ExecutionInfo {
 	uint64_t last_frame_pointer;
 	const char* last_peripheral_name = nullptr;
 
-	int32_t last_parameter;
-	
+	int64_t last_parameter;
+	//actual outcome of a branch/jump and its encoded offset (I_imm for JALR, as its target is dynamic)
+	BranchOutcome last_branch_outcome = BranchOutcome::NONE;
+	int64_t last_branch_offset = 0;
+
 	uint64_t last_step_id;
 };
 
@@ -114,8 +202,11 @@ struct StepInsertInfo {
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
 	// Parameter tracking fields
-	int32_t parameter; // currently used for: Shift
+	int64_t parameter; // shift amount, branch/jump target or decoded immediate (NO_PARAMETER if none)
 	const char* peripheral_name = nullptr;
+	uint64_t predecessor_pc;
+	BranchOutcome branch_outcome;
+	int64_t branch_offset;
 };
 
 struct ScoreParams {
@@ -152,8 +243,11 @@ struct StepUpdateInfo {
 	AccessType access_type;
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
-	int32_t parameter; // currently used for: Shift and Branch Targets
+	int64_t parameter; // shift amount, branch/jump target or decoded immediate (NO_PARAMETER if none)
 	const char* peripheral_name = nullptr;
+	uint64_t predecessor_pc;
+	BranchOutcome branch_outcome;
+	int64_t branch_offset;
 };
 
 class InstructionNode;
@@ -312,6 +406,10 @@ struct RegisterSet
 struct RegisterSetCounter {
 	int count;
 	RegisterSet regset;
+	#ifdef trace_predecessor_pcs
+	//pc this entry was reached from -> how often. A node usually has one or two distinct predecessors
+	std::map<uint64_t, uint64_t> predecessors;
+	#endif
 	RegisterSetCounter(int8_t rs1, int8_t rs2, int8_t rd)
 		: count(1), regset(rs1, rs2, rd) {}
 };
@@ -349,7 +447,8 @@ class InstructionNode{
 		//true weight is updated if current step id > last_occurrence + depth
 		uint64_t last_occurrence = 0;
 
-		std::unordered_map<uint64_t, std::unordered_map<int32_t, uint64_t>> parameters;
+		//pc -> (parameter value -> how often this value was seen at that pc)
+		std::unordered_map<uint64_t, std::unordered_map<int64_t, uint64_t>> parameters;
 
 		uint64_t total_cycles = 0;
 		//sum of the step ids this node occurred in
@@ -400,7 +499,7 @@ class InstructionNode{
 		#else
 			//check for any dependencies
 			uint64_t dependencies_count = 0;
-			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
+			for (size_t i = 0; i < trace_depth; i++)
 			{
 			if(dependencies_true_[i]){
 				dependencies_count++;
@@ -467,7 +566,7 @@ class InstructionNode{
 
 			//check for any dependencies
 			//TODO: include depth so we do not have to iterate over unnecessary empty entries
-			for (size_t i = 1; i < INSTRUCTION_TREE_DEPTH; i++)
+			for (size_t i = 1; i < trace_depth; i++)
 			{
 			if(dependencies_true_[i]){
 				result += 1/(double)i; //i should never be 0 as a node does not depend on itself
@@ -487,7 +586,7 @@ class InstructionNode{
 
 		uint32_t count_true_dependencies(){
 			uint32_t result = 0;
-			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
+			for (size_t i = 0; i < trace_depth; i++)
 			{
 			if(dependencies_true_[i]){
 				result++;
@@ -550,7 +649,17 @@ class InstructionNode{
 				for (const auto& entry : register_sets) {
 					uint64_t key = entry.first;
 					const RegisterSetCounter& rsc = entry.second;
-					jsonRegisterSets[std::to_string(key)] = { {"count", rsc.count}, {"rs1", rsc.regset.rs1}, {"rs2", rsc.regset.rs2}, {"rd", rsc.regset.rd} };
+					nlohmann::json jsonEntry = { {"count", rsc.count}, {"rs1", rsc.regset.rs1}, {"rs2", rsc.regset.rs2}, {"rd", rsc.regset.rd} };
+					#ifdef trace_predecessor_pcs
+					if (!rsc.predecessors.empty()) {
+						nlohmann::json jsonPredecessors = nlohmann::json::object();
+						for (const auto& predecessor : rsc.predecessors) {
+							jsonPredecessors[std::to_string(predecessor.first)] = predecessor.second;
+						}
+						jsonEntry["predecessors"] = jsonPredecessors;
+					}
+					#endif
+					jsonRegisterSets[std::to_string(key)] = jsonEntry;
 				}
 				jsonNode["register_sets"] = jsonRegisterSets;
 			#endif 
@@ -559,7 +668,7 @@ class InstructionNode{
 			std::set<int8_t> anti_dependencies;
 			std::set<int8_t> output_dependencies;
 
-			for (size_t i = 1; i < INSTRUCTION_TREE_DEPTH; i++){
+			for (size_t i = 1; i < trace_depth; i++){
 					if(dependencies_true_[i]){
 						true_dependencies.push_back(i);
 					}
@@ -621,7 +730,7 @@ class InstructionNode{
 					<< max_weight - weight << ";"
 					<< total_max_weight - weight << ";"
 					<< depth << ";" //Length
-					<< INSTRUCTION_TREE_DEPTH - depth << ";" //Length
+					<< trace_depth - depth << ";" //Length
 					<< -1 << ";" //cycles used by sequence for one iteration
 					<< current_dep_score << ";"
 					<< current_total_dep_score << ";"
@@ -695,7 +804,7 @@ class InstructionNode{
 									bool reduce_graph_output, float branch_omission_threshold) = 0;
 
 		float dot_hue(uint depth){
-			return (float)depth/(float)INSTRUCTION_TREE_DEPTH;
+			return (float)depth/(float)trace_depth;
 		}
 		float dot_sat(uint depth, uint depender){
 			//TODO higher saturation and value for instr with multiple children depending on it
@@ -717,53 +826,30 @@ class InstructionNode{
 			}
 
 			#ifdef trace_parameter
-			// Track instruction parameters based on instruction type
-			using namespace Opcode;
-			if(depth > 0){//do not track parameters for root node as this adds a high amount of overhead and entries with almost not benefit
-				switch (instruction) {
-					// Shift instructions - track shift amount
-					case SLL:
-					case SRL:
-					case SRA:
-					case SLLI:
-					case SRLI:
-					case SRAI:{
-						//TODO move definition outside of case if adding more parameters
-						auto& param_entry = parameters[p.pc]; //fetch reference to parameter entry for this pc
-						if (p.parameter >= 0) {
-							param_entry[p.parameter]++; // Increment count for this parameter value
-						}
-						}
-						break;
-					case JAL:
-					case JALR:
-					case BEQ:
-					case BNE:
-					case BLT:
-					case BLTU:
-					case BGE:
-					case BGEU:{
-						auto& param_entry = parameters[p.pc]; //fetch reference to parameter entry for this pc
-						if (p.parameter >= 0) {
-							param_entry[p.parameter]++; // Increment count for this parameter value
-						}
-						}
-						break;
-						
-					default:
-						// No specific parameters to track for this instruction
-						break;
+			//record the value the ISS decoded for this instruction: shift amount, branch/jump target or,
+			//with trace_parameter_immediates, the decoded immediate. Values may be negative.
+			#ifndef trace_root_parameters
+			//tracking the root node costs one entry per pc executing this opcode with little benefit
+			if(depth > 0)
+			#endif
+			{
+				if (p.parameter != NO_PARAMETER) {
+					parameters[p.pc][p.parameter]++; //increment count for this parameter value
 				}
 			}
 			#endif
-			
+
 			#ifdef trace_individual_registers
 			auto it = register_sets.find(p.pc);
 			if(it == register_sets.end()) {
-				register_sets.emplace(p.pc, RegisterSetCounter{static_cast<int8_t>(p.rs1), static_cast<int8_t>(p.rs2), static_cast<int8_t>(p.rd)});
+				it = register_sets.emplace(p.pc, RegisterSetCounter{static_cast<int8_t>(p.rs1), static_cast<int8_t>(p.rs2), static_cast<int8_t>(p.rd)}).first;
 			} else {
 				it->second.count++;
 			}
+			#ifdef trace_predecessor_pcs
+			//which pc this occurrence was actually reached from, so later, a pc path can be proven instead of guessed
+			it->second.predecessors[p.predecessor_pc]++;
+			#endif
 			#endif
 			#ifdef handle_self_modifying_code
 			else{
@@ -856,7 +942,7 @@ class InstructionNode{
 
 			std::set<int8_t> indices_anti;
 			std::set<int8_t> indices_out;
-			for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
+			for (size_t i = 0; i < trace_depth; i++) {
 				if (dependencies_anti_[i]) {
 					indices_anti.insert(i);
 				}
@@ -1005,10 +1091,21 @@ class MemoryNode{
 
 };
 
+//taken/not-taken counts and the encoded offset of one branch/jump pc
+struct BranchOutcomeCounter {
+	int64_t offset = 0; //encoded relative offset (B_imm/J_imm), or I_imm for JALR whose target is dynamic
+	uint64_t taken = 0;
+	uint64_t not_taken = 0;
+};
+
 class BranchNode{
-	public: 
+	public:
 		// std::unordered_map<uint64_t, std::unordered_set<uint64_t>> jump_targets; //Handled as a parameter
+		//relative offset (as unsigned wraparound) -> how often the branch was taken with that offset
 		std::map<uint64_t, uint64_t> relative_offsets;
+		#ifdef trace_branch_outcomes
+		std::map<uint64_t, BranchOutcomeCounter> branch_outcomes; //pc -> outcome counts
+		#endif
 		bool is_backward_jump = false;
 		bool is_forward_jump = false;
 
@@ -1016,14 +1113,26 @@ class BranchNode{
 		BranchNode(int64_t offset);
 
 		nlohmann::ordered_json branch_to_json(){
-			nlohmann::ordered_json json; 
+			nlohmann::ordered_json json;
 			json["Direction"] = (is_backward_jump * 1) + (is_forward_jump * 2);
 			json["offsets"] = relative_offsets;
+			#ifdef trace_branch_outcomes
+			nlohmann::json jsonOutcomes = nlohmann::json::object();
+			for (const auto& entry : branch_outcomes) {
+				jsonOutcomes[std::to_string(entry.first)] = {
+					{"offset", entry.second.offset},
+					{"taken", entry.second.taken},
+					{"not_taken", entry.second.not_taken}};
+			}
+			json["BranchOutcomes"] = jsonOutcomes;
+			#endif
 			return json;
 		};
 
-		void register_access(uint64_t pc, uint64_t address, AccessType access_type,uint64_t prev_access, 
-								uint64_t stackpointer, uint64_t framepointer);
+		//record the actual outcome of one dynamic execution of this branch/jump.
+		//pc_relative is false for JALR, whose offset is relative to rs1 instead of the pc,
+		//so it must not be folded into the pc relative Direction/offsets fields
+		void register_branch(uint64_t pc, BranchOutcome outcome, int64_t offset, bool pc_relative);
 
 };
 
@@ -1104,6 +1213,7 @@ class InstructionNodeBranch : public InstructionNodeR, virtual public BranchNode
 			
 			return 1.0;
 		}
+	void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
 	NODE_TYPE get_node_type() override;
 	nlohmann::ordered_json to_json() override{
 		nlohmann::ordered_json additional_fields = BranchNode::branch_to_json();
@@ -1140,6 +1250,7 @@ class InstructionNodeBranchLeaf : public InstructionNodeLeaf, virtual public Bra
 			
 			return 1.0;
 		}
+	void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
 	NODE_TYPE get_node_type() override;
 	nlohmann::ordered_json to_json() override{
 		nlohmann::ordered_json additional_fields = BranchNode::branch_to_json();

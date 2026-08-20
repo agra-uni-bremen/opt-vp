@@ -30,6 +30,25 @@ using namespace Opcode;
 	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> memory_store;
 	bool load_store_dirty = true; //fill with default during first iteration
 
+uint32_t trace_depth = INSTRUCTION_TREE_DEPTH;
+
+void set_trace_depth(uint32_t depth){
+	if(depth == 0){
+		return; //keep the compiled default
+	}
+	if(depth > INSTRUCTION_TREE_DEPTH){
+		printf("[WARNING] requested trace depth %u exceeds the compiled maximum of %u. "
+				"Rebuild with -DINSTRUCTION_TREE_DEPTH=%u to use it. Using %u instead.\n",
+				depth, (uint32_t)INSTRUCTION_TREE_DEPTH, depth, (uint32_t)INSTRUCTION_TREE_DEPTH);
+		depth = INSTRUCTION_TREE_DEPTH;
+	}
+	if(depth < 2){
+		printf("[WARNING] trace depth %u is too small (a tree needs at least a root and one child). Using 2 instead.\n", depth);
+		depth = 2;
+	}
+	trace_depth = depth;
+}
+
 inline uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash){
 	return ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
 }
@@ -76,7 +95,7 @@ void InstructionNodeR::insert_rb(
 	}
 
 	if(load_store_dirty){
-		for(size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
+		for(size_t i = 0; i < trace_depth; i++) {
 			memory_load[i] = 0;
 			memory_store[i] = 0;
 			load_store_dirty = false;
@@ -94,9 +113,9 @@ void InstructionNodeR::insert_rb(
 	printf("---------------\nChecking dependencies\n---------------\n");
 	#endif
 
-	for (uint32_t i = 0; i < INSTRUCTION_TREE_DEPTH-offset; i++)//update the root node and insert all other nodes
+	for (uint32_t i = 0; i < trace_depth-offset; i++)//update the root node and insert all other nodes
 	{
-		uint8_t rb_index = (next_rb_index+i)%INSTRUCTION_TREE_DEPTH;
+		uint8_t rb_index = (next_rb_index+i)%trace_depth;
 		ExecutionInfo* current_step = &last_executed_steps_p[rb_index];// [rb_index];
 		if(current_step->last_executed_instruction==Opcode::UNDEF){
 			printf("[WARNING] trying to insert zero opcode into tree at index %d with offset %d\n", i, offset);
@@ -343,9 +362,9 @@ void InstructionNodeR::insert_rb(
 			{
 				int8_t val = register_dependencies_true[j];
 				
-				int8_t relative_val = (i - val + INSTRUCTION_TREE_DEPTH)%INSTRUCTION_TREE_DEPTH; //undef for values <0
+				int8_t relative_val = (i - val + trace_depth)%trace_depth; //undef for values <0
 				uint8_t color_fg = 249; //rs1+16;
-				uint8_t color_bg = (232 + relative_val*23/(INSTRUCTION_TREE_DEPTH-2))%256;
+				uint8_t color_bg = (232 + relative_val*23/(trace_depth-2))%256;
 				
 				if(j == tmp_true_dependency1){
 										//color group + start offset + group rb_index
@@ -397,7 +416,10 @@ void InstructionNodeR::insert_rb(
 									current_step->last_stack_pointer,
 									current_step->last_frame_pointer,
 									current_step->last_parameter,
-									current_step->last_peripheral_name
+									current_step->last_peripheral_name,
+									current_step->last_predecessor_pc,
+									current_step->last_branch_outcome,
+									current_step->last_branch_offset
 									});
 			// inserted_nodes[i] = current_node;
 		}else{
@@ -412,7 +434,10 @@ void InstructionNodeR::insert_rb(
 			current_step->last_stack_pointer,
 			current_step->last_frame_pointer,
 			current_step->last_parameter,
-			current_step->last_peripheral_name
+			current_step->last_peripheral_name,
+			current_step->last_predecessor_pc,
+			current_step->last_branch_outcome,
+			current_step->last_branch_offset
 			}, 0); //depth is 0 as this is the root node
 		}
 	}
@@ -437,7 +462,7 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 			case Mapping::LH:
 			case Mapping::LHU:
 			case Mapping::LW:
-				if(p.depth < INSTRUCTION_TREE_DEPTH-1){
+				if(p.depth < trace_depth-1){
 					children.push_back(new InstructionNodeMemory(p.op, subtree_hash,0,false));
 				}else{
 					//create leaf node instead
@@ -448,7 +473,7 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 			case Mapping::SB:
 			case Mapping::SH:
 			case Mapping::SW:
-				if(p.depth < INSTRUCTION_TREE_DEPTH-1){
+				if(p.depth < trace_depth-1){
 					children.push_back(new InstructionNodeMemory(p.op, subtree_hash,0,true));
 				}else{
 					//create leaf node instead
@@ -464,17 +489,17 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 			case Mapping::BGEU:
 			case Mapping::JAL:
 			case Mapping::JALR:
-				if(p.depth < INSTRUCTION_TREE_DEPTH-1){
-					children.push_back(new InstructionNodeBranch(p.op, subtree_hash,-4));
+				if(p.depth < trace_depth-1){
+					children.push_back(new InstructionNodeBranch(p.op, subtree_hash, 0));
 				}else{
 					//create leaf node instead
-					children.push_back(new InstructionNodeBranchLeaf(p.op, subtree_hash, p.pc,-4));
+					children.push_back(new InstructionNodeBranchLeaf(p.op, subtree_hash, p.pc, 0));
 				}
 				break;
 
 			default:
 				//printf("create RNode for instruction: %s\n", mappingStr[op]);
-				if(p.depth < INSTRUCTION_TREE_DEPTH-1){
+				if(p.depth < trace_depth-1){
 					children.push_back(new InstructionNodeR(p.op, subtree_hash));
 				}else{
 					//create leaf node instead
@@ -510,7 +535,10 @@ InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
 								p.stack_pointer,
 								p.frame_pointer,
 								p.parameter,
-								p.peripheral_name
+								p.peripheral_name,
+								p.predecessor_pc,
+								p.branch_outcome,
+								p.branch_offset
 							}, p.depth);
 
 	return found_child;
@@ -584,7 +612,7 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 
 		<< "<TR><TD>";
 		uint dependencies_count = 0;
-		for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
+		for (size_t i = 0; i < trace_depth; i++)
 		{
 			//printf("[%d]", dependencies_true_[i]);
 			if(dependencies_true_[i]){
@@ -1015,6 +1043,11 @@ int InstructionNodeR::prune_tree(uint64_t weight_threshold, uint8_t depth){
 					der_child->subtree_hash, -1, 0);
 					new_child->pc_map = der_child->get_pc();
 					new_child->relative_offsets = der_child->relative_offsets;
+					#ifdef trace_branch_outcomes
+					new_child->branch_outcomes = der_child->branch_outcomes;
+					#endif
+					new_child->is_backward_jump = der_child->is_backward_jump;
+					new_child->is_forward_jump = der_child->is_forward_jump;
 					//new_child->jump_targets = der_child->jump_targets; //handled as parameter  
 					// delete child;
 					child = new_child;
@@ -1089,7 +1122,7 @@ std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const ch
 		const char* label = instruction_string;
 		std::stringstream name;
 		//HTML type
-		if(depth>=INSTRUCTION_TREE_DEPTH-1){
+		if(depth>=trace_depth-1){
 			name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
 			
 			dot_stream << name.str(); 
@@ -1273,7 +1306,7 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 
 		<< "<TR><TD>";
 		uint dependencies_count = 0;
-		for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)
+		for (size_t i = 0; i < trace_depth; i++)
 		{
 			if(dependencies_true_[i]){
 				dependencies_count++;
@@ -1394,7 +1427,7 @@ std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, co
 		const char* label = instruction_string;
 		std::stringstream name;
 		//HTML type
-		if(depth>=INSTRUCTION_TREE_DEPTH-1){//standard leaf node
+		if(depth>=trace_depth-1){//standard leaf node
 			name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
 			
 			dot_stream << name.str(); 
@@ -1498,6 +1531,44 @@ BranchNode::BranchNode(int64_t offset){
 	}
 }
 
+void BranchNode::register_branch(uint64_t pc, BranchOutcome outcome, int64_t offset, bool pc_relative){
+	#ifdef trace_branch_outcomes
+	BranchOutcomeCounter& counter = branch_outcomes[pc];
+	counter.offset = offset;
+	if(outcome==BranchOutcome::TAKEN){
+		counter.taken++;
+	}else{
+		counter.not_taken++;
+	}
+	#endif
+
+	if(outcome!=BranchOutcome::TAKEN || !pc_relative){
+		return; //direction and offset histogram only describe branches that were taken relative to the pc
+	}
+	if(offset!=0){
+		relative_offsets[offset]++;
+		if(offset<0){
+			is_backward_jump = true;
+		}else{
+			is_forward_jump = true;
+		}
+	}
+}
+
+void InstructionNodeBranch::update_weight(const StepUpdateInfo& p, uint32_t depth){
+	InstructionNodeR::update_weight(p, depth);
+	if(p.branch_outcome!=BranchOutcome::NONE){
+		register_branch(p.pc, p.branch_outcome, p.branch_offset, instruction!=Mapping::JALR);
+	}
+}
+
+void InstructionNodeBranchLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
+	InstructionNodeLeaf::update_weight(p, depth);
+	if(p.branch_outcome!=BranchOutcome::NONE){
+		register_branch(p.pc, p.branch_outcome, p.branch_offset, instruction!=Mapping::JALR);
+	}
+}
+
 InstructionNodeBranch::InstructionNodeBranch(Mapping instruction, uint64_t parent_hash, int64_t offset): 
 			  InstructionNode(instruction, parent_hash), 
 			  BranchNode(offset),
@@ -1517,7 +1588,7 @@ std::vector<PathNode> InstructionNodeR::path_to_path_nodes(Path path, uint depth
 		
 	std::set<int8_t> indices_anti;
 	std::set<int8_t> indices_out;
-	for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++) {
+	for (size_t i = 0; i < trace_depth; i++) {
 		if (dependencies_anti_[i]) {
 			indices_anti.insert(i);
 		}
@@ -1638,7 +1709,7 @@ PathNode::PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float scor
 		program_counters = {};
 		#endif
 
-		for (size_t i = 1; i < INSTRUCTION_TREE_DEPTH; i++)
+		for (size_t i = 1; i < trace_depth; i++)
 			{
 			if(dep_true[i]){
 				true_dependencies.push_back(i);

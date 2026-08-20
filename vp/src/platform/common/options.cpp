@@ -26,6 +26,7 @@ Options::Options(void) {
 		("export-full,e", po::bool_switch(&output_full_export), "export all tree data as json files")
 		("coverage-csv", po::value<std::string>(&coverage_csv_file)->implicit_value("sequences.csv"), "export top sequences as csv")
 		("top-n", po::value<unsigned int>(&top_n)->default_value(10), "top N sequences to export")
+		("trace-depth", po::value<unsigned int>(&instruction_tree_depth), "length of the traced instruction sequences (default and maximum: the compiled INSTRUCTION_TREE_DEPTH)")
 		("similarity", po::value<float>(&similarity_threshold)->default_value(0.2f), "similarity threshold for filtering top sequences")
 		("reduce-graph,r", po::value<float>(&reduce_graph_output), "reduce graph output by omitting branches below this threshold (1.0 - 0.0)")
 		("path-hashes", po::value<std::vector<uint64_t>>(&input_hash_list)->multitoken(), "list of path hashes to trace parent paths for")
@@ -103,6 +104,7 @@ void Options::printValues(std::ostream& os) const {
 	os << "use_debug_runner: " << use_debug_runner << std::endl;
 	os << "debug_port: " << debug_port << std::endl;
 	os << "trace_mode: " << trace_mode << std::endl;
+	os << "trace_depth: " << instruction_tree_depth << std::endl;
 	os << "tlm_global_quantum: " << tlm_global_quantum << std::endl;
 	os << "use_instr_dmi: " << use_instr_dmi << std::endl;
 	os << "use_data_dmi: " << use_data_dmi << std::endl;

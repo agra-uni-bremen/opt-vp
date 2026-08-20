@@ -5,6 +5,16 @@ project(riscv-vp
 
 option(USE_SYSTEM_SYSTEMC "use systemc version provided by the system" OFF)
 
+# maximum length of the traced instruction sequences. Nodes keep static arrays of this size,
+# so it is fixed at compile time. The effective depth can be lowered at runtime with --trace-depth.
+set(INSTRUCTION_TREE_DEPTH "" CACHE STRING "maximum instruction tree depth (default: 20, see trace.h)")
+
+# optional trace features, see vp/src/core/common/trace.h
+option(NO_TRACE_PARAMETER_IMMEDIATES "do not record decoded immediates (smaller traces, faster)" OFF)
+option(NO_TRACE_PREDECESSOR_PCS "do not record predecessor pcs per register set" OFF)
+option(NO_TRACE_BRANCH_OUTCOMES "do not record per-pc branch taken/not-taken counts" OFF)
+option(TRACE_ROOT_PARAMETERS "also record parameters on the root node of each tree" OFF)
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
@@ -13,6 +23,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wpedantic")
 set(CMAKE_CXX_FLAGS_DEBUG "-g3")        #"-fsanitize=address -fno-omit-frame-pointer"
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
+if(INSTRUCTION_TREE_DEPTH)
+	add_compile_definitions(INSTRUCTION_TREE_DEPTH=${INSTRUCTION_TREE_DEPTH})
+endif()
+foreach(TRACE_FLAG NO_TRACE_PARAMETER_IMMEDIATES NO_TRACE_PREDECESSOR_PCS NO_TRACE_BRANCH_OUTCOMES TRACE_ROOT_PARAMETERS)
+	if(${TRACE_FLAG})
+		add_compile_definitions(${TRACE_FLAG})
+	endif()
+endforeach()
 
 # Allows running tests without invoking `make install` first.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

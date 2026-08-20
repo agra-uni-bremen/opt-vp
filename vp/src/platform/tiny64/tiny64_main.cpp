@@ -53,6 +53,7 @@ public:
 int sc_main(int argc, char **argv) {
 	TinyOptions opt;
 	opt.parse(argc, argv);
+	set_trace_depth(opt.instruction_tree_depth); //keeps the compiled depth if the option was not given
 
 	std::srand(std::time(nullptr));  // use current time as seed for random generator
 
