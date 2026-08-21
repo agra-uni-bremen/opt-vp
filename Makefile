@@ -3,7 +3,7 @@ MAKEFLAGS += --no-print-directory
 # Whether to use a system-wide SystemC library instead of the vendored one.
 USE_SYSTEM_SYSTEMC ?= OFF
 
-BUILD_TYPE ?= Debug
+BUILD_TYPE ?= Release
 
 # Enable gprof profiling flags when PG=ON (use: `make PG=ON ...`).
 PG ?= OFF
