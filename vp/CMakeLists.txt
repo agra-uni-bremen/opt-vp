@@ -13,7 +13,7 @@ set(INSTRUCTION_TREE_DEPTH "" CACHE STRING "maximum instruction tree depth (defa
 option(NO_TRACE_PARAMETER_IMMEDIATES "do not record decoded immediates (smaller traces, faster)" OFF)
 option(NO_TRACE_PREDECESSOR_PCS "do not record predecessor pcs per register set" OFF)
 option(NO_TRACE_BRANCH_OUTCOMES "do not record per-pc branch taken/not-taken counts" OFF)
-option(TRACE_ROOT_PARAMETERS "also record parameters on the root node of each tree" OFF)
+option(TRACE_ROOT_PARAMETERS "also record parameters on the root node of each tree" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)

@@ -7,7 +7,7 @@
 #include <sstream>
 
 LoadedLibrary load_scoring_functions(const std::string& libraryPath){
-	void* library = dlmopen(-1, libraryPath.c_str(), RTLD_NOW); // | RTLD_GLOBAL
+	void* library = dlopen(libraryPath.c_str(), RTLD_NOW); // use dlopen to share C++ runtime
 	std::cout << "Loading library from: " << libraryPath << std::endl;
 
 	std::array<ScoreFunction, SF_BATCH_SIZE>* score_functions_ptr; 

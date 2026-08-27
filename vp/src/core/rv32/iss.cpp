@@ -2994,9 +2994,12 @@ void ISS::show() {
 
 				if (mode == 'r') {
 					// Reload the library and get the updated array of functions
-					dlclose(sf_lib.handle);
+					// Clear any copies of std::function so their destructors won't call into the unloaded library
+					for (auto &f : score_functions) f = nullptr;
+					for (auto &f : sf_lib.functions) f = nullptr;
+					if (sf_lib.handle) dlclose(sf_lib.handle);
 					std::string library_path = 
-							"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
+						"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
 					sf_lib = load_scoring_functions(library_path);
 					score_functions = sf_lib.functions;
 					//TODO add checks for library and allow to specify custom path
@@ -3022,7 +3025,10 @@ void ISS::show() {
 						<< ms_double.count()/300.0 << "ms on average per function" << std::endl;
 				} 
 				else if (mode == 'q') {
-					dlclose(sf_lib.handle);
+					// Clear copied scoring functions before closing the library
+					for (auto &f : score_functions) f = nullptr;
+					for (auto &f : sf_lib.functions) f = nullptr;
+					if (sf_lib.handle) dlclose(sf_lib.handle);
 					break;
 				} 
 				else if (mode == 'p') {
@@ -3058,6 +3064,9 @@ void ISS::show() {
 		}
 		
 		//close library
+		// Ensure we clear function objects before unloading the library to avoid calling into unloaded code
+		for (auto &f : score_functions) f = nullptr;
+		for (auto &f : sf_lib.functions) f = nullptr;
 		if(sf_lib.handle){
 			dlclose(sf_lib.handle);
 		}

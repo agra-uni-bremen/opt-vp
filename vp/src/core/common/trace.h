@@ -70,9 +70,10 @@
 //also track parameters on the root node of a tree. Costs one entry per pc executing that opcode
 //(the root of a tree is reached by every occurrence of its instruction), so it is off by default.
 //enable with -DTRACE_ROOT_PARAMETERS
-#ifdef TRACE_ROOT_PARAMETERS
+//temporarily hardcode this as ON
+// #ifdef TRACE_ROOT_PARAMETERS
 #define trace_root_parameters
-#endif
+// #endif
 
 //#define dot_pc_on_pruned_nodes
 
