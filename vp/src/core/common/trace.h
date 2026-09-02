@@ -227,6 +227,7 @@ struct ScoreParams {
 	Opcode::Mapping instr; 
 	Opcode::Mapping tree; 
 	uint64_t weight; 
+	// uint64_t true_weight;
 	uint32_t length; 
 	double dep_score;
 	uint32_t num_children;
@@ -270,6 +271,7 @@ struct Path
 {
 	uint32_t length = 0;
 	uint64_t minimum_weight = 0;
+	uint64_t true_weight = 0;
 	float score_bonus = 0.0;
 	float score_multiplier = 1.0;
 
@@ -284,8 +286,9 @@ struct Path
 		uint32_t num_children = 0; //TODO end_of_sequence test for type and count children  
 		uint32_t inputs = 0; //TODO
 		uint32_t outputs = 0; //TODO 
+		uint64_t sequence_weight = true_weight > 0 ? true_weight : minimum_weight;
 		ScoreParams params = {opcodes.back(), opcodes[0], 
-		minimum_weight, length, inverse_dependency_score, 
+		sequence_weight, length, inverse_dependency_score, 
 		num_children, inputs, outputs, score_multiplier, score_bonus};
 		float score_result = score_function(params);
 		if(score_result < 0){

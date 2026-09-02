@@ -821,6 +821,7 @@ namespace {
 		Path path;
 		path.length = p.length;
 		path.minimum_weight = node.weight;
+		path.true_weight = node.true_weight;
 		path.score_bonus = p.score_bonus + node.get_score_bonus();
 		path.score_multiplier = p.score_multiplier * node.get_score_multiplier();
 		path.inverse_dependency_score = node.get_inv_dep_score();
@@ -896,6 +897,7 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 	Path max_path;
 	max_path.length = p.length; //was increased on call
 	max_path.minimum_weight = weight; //weight of a child should always be smaller or equal
+	max_path.true_weight = true_weight;
 	max_path.score_bonus = p.score_bonus + score_bonus_of_this_node;
 	max_path.score_multiplier = 
 			p.score_multiplier * score_multiplier_of_this_node; 
@@ -950,6 +952,7 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 		if((max_path.get_score(p.score_function) < max_child_path.get_score(p.score_function)) || static_cast<uint32_t>(p.force_extension_depth+1)==p.length){
 			max_path.length = max_child_path.length;
 			max_path.minimum_weight = max_child_path.minimum_weight;
+			max_path.true_weight = max_child_path.true_weight;
 			max_path.opcodes.insert(max_path.opcodes.end(), 
 							max_child_path.opcodes.begin(), 
 							max_child_path.opcodes.end());

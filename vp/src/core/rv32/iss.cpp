@@ -2711,9 +2711,9 @@ void ISS::show() {
 	printf("start analysis\n");
 	std::vector<Path> tmp_discovered_sub_sequences; 
 	auto sf = [](ScoreParams p) -> float {
-		float score = (p.length * p.weight);// * p.score_multiplier //TODO update to use true weight instead
+		double score = static_cast<double>(p.length) * static_cast<double>(p.weight);// * p.score_multiplier //TODO update to use true weight instead
 			//+ p.weight * p.score_bonus; //length * minimum_weight;
-		return score;
+		return static_cast<float>(score);
 	};
 	for (InstructionNodeR& tree : instruction_trees){
 		std::vector<Path> top_paths = tree.extend_top_paths({1, 0, 1.0, i, -1, Opcode::Mapping::UNDEF, sf}, coverage_top_n);
@@ -2801,41 +2801,46 @@ void ISS::show() {
 
 		std::vector<PathNode> full_path;
 		full_path = found_tree->path_to_path_nodes(p, 0);
-		std::vector<BranchingPoint> variant_starting_points = found_tree->find_variant_branch(p, 0);
-		//sort variant starting points, so we can extend the top N
-		std::sort(variant_starting_points.begin(), variant_starting_points.end(), 
-		[](BranchingPoint a, BranchingPoint b) -> bool{
-			return a.ratio>b.ratio;
-		});
+		std::vector<BranchingPoint> variant_starting_points; 
+		if(output_as_json){
+			variant_starting_points = found_tree->find_variant_branch(p, 0);
+			//sort variant starting points, so we can extend the top N
+			std::sort(variant_starting_points.begin(), variant_starting_points.end(), 
+			[](BranchingPoint a, BranchingPoint b) -> bool{
+				return a.ratio>b.ratio;
+			});
 
-		#ifdef log_variants
-		for (auto &&v : variant_starting_points)
-		{
-			printf("Variant Branching Point: %s at %d, with ratio %.4f\n", Opcode::mappingStr[v.instruction], v.depth, v.ratio);
+			#ifdef log_variants
+			for (auto &&v : variant_starting_points)
+			{
+				printf("Variant Branching Point: %s at %d, with ratio %.4f\n", Opcode::mappingStr[v.instruction], v.depth, v.ratio);
+			}
+			#endif
 		}
-		#endif
 
 		discovered_sequences_node_list.push_back(full_path);
-		discovered_variant_starting_points.push_back(variant_starting_points);
-
-		//force extend to top N variant starting points
 		std::vector<Path> tmp_discovered_variants; 
-		uint8_t max_variants = !(variant_starting_points.size()<MAX_VARIANTS)?MAX_VARIANTS:variant_starting_points.size();
-		for (int32_t i = 0; i < max_variants; i++)
-		{
-			//convert to Path first (up to new branching point and then force extension)
-			Path tmp_variant = found_tree->extend_path({1, 0, 1.0, i, variant_starting_points[i].depth, 
-									variant_starting_points[i].instruction, sf});
-			tmp_discovered_variants.push_back(tmp_variant);
-		}
+		if(output_as_json){
+			discovered_variant_starting_points.push_back(variant_starting_points);
+
+			//force extend to top N variant starting points
+			uint8_t max_variants = !(variant_starting_points.size()<MAX_VARIANTS)?MAX_VARIANTS:variant_starting_points.size();
+			for (int32_t i = 0; i < max_variants; i++)
+			{
+				//convert to Path first (up to new branching point and then force extension)
+				Path tmp_variant = found_tree->extend_path({1, 0, 1.0, i, variant_starting_points[i].depth, 
+										variant_starting_points[i].instruction, sf});
+				tmp_discovered_variants.push_back(tmp_variant);
+			}
 		
-		printf("-------------------------------------------\n");
-		//print discovered sequences
-		//print top sequence for each tree
-		//p.show();	//This line actualy prints the formatted sequences 
-		// printf("Stats:\n");
-		// p.to_csv_stats();
-		//print stats of sequence to file as csv
+			printf("-------------------------------------------\n");
+			//print discovered sequences
+			//print top sequence for each tree
+			//p.show();	//This line actualy prints the formatted sequences 
+			// printf("Stats:\n");
+			// p.to_csv_stats();
+			//print stats of sequence to file as csv
+		}
 
 		{
 			std::ofstream csv_out(csv_stats, std::ios::app);
@@ -2843,43 +2848,44 @@ void ISS::show() {
 			p.to_csv_stats(csv_out, csrs.instret.reg);
 			#endif
 		}
-
-		tmp_discovered_sub_sequences = p.end_of_sequence->force_path_extension(p, sf);
-		
-		//printf("last Node in sequence should be %s\n", Opcode::mappingStr[p.end_of_sequence->instruction]);
-		#ifdef log_variants
-		printf("-------------------------------------------\n");
-		printf("Sub Sequences (%d)\n[\n",tmp_discovered_sub_sequences.size());
-		#endif
-
-		std::vector<std::vector<PathNode>> tmp_node_list;
-		for (auto &&subseq : tmp_discovered_sub_sequences)
-		{
+		if(output_as_json){
+			tmp_discovered_sub_sequences = p.end_of_sequence->force_path_extension(p, sf);
+			
+			//printf("last Node in sequence should be %s\n", Opcode::mappingStr[p.end_of_sequence->instruction]);
 			#ifdef log_variants
-			printf(" - Sub Sequence:\n");
-			subseq.show(" - ");
-			printf(" - ,\n");
+			printf("-------------------------------------------\n");
+			printf("Sub Sequences (%d)\n[\n",tmp_discovered_sub_sequences.size());
 			#endif
-			tmp_node_list.push_back(found_tree->path_to_path_nodes(subseq, 0));
-		}
-		discovered_sub_sequences_node_lists.push_back(tmp_node_list);
-		discovered_sub_sequences.push_back(tmp_discovered_sub_sequences);
 
-		//convert variants to path nodes
-		std::vector<std::vector<PathNode>> tmp_variant_node_list;
-		for (auto &&variant : tmp_discovered_variants)
-		{
+			std::vector<std::vector<PathNode>> tmp_node_list;
+			for (auto &&subseq : tmp_discovered_sub_sequences)
+			{
+				#ifdef log_variants
+				printf(" - Sub Sequence:\n");
+				subseq.show(" - ");
+				printf(" - ,\n");
+				#endif
+				tmp_node_list.push_back(found_tree->path_to_path_nodes(subseq, 0));
+			}
+			discovered_sub_sequences_node_lists.push_back(tmp_node_list);
+			discovered_sub_sequences.push_back(tmp_discovered_sub_sequences);
+
+			//convert variants to path nodes
+			std::vector<std::vector<PathNode>> tmp_variant_node_list;
+			for (auto &&variant : tmp_discovered_variants)
+			{
+				#ifdef log_variants
+				printf(" - Variant Sequence:\n");
+				variant.show(" - ");
+				printf(" - ,\n");
+				#endif
+				tmp_variant_node_list.push_back(found_tree->path_to_path_nodes(variant, 0));
+			}
+			discovered_variant_sequences_node_lists.push_back(tmp_variant_node_list);
 			#ifdef log_variants
-			printf(" - Variant Sequence:\n");
-			variant.show(" - ");
-			printf(" - ,\n");
+			printf("]\n-------------------------------------discovered_sequences_node_list------\n");
 			#endif
-			tmp_variant_node_list.push_back(found_tree->path_to_path_nodes(variant, 0));
 		}
-		discovered_variant_sequences_node_lists.push_back(tmp_variant_node_list);
-		#ifdef log_variants
-		printf("]\n-------------------------------------discovered_sequences_node_list------\n");
-		#endif
 	}
 
 	{
@@ -2934,41 +2940,45 @@ void ISS::show() {
 
 
 		//evaluate additional score functions
-		LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
+		// Do not load the additional scoring function for now, until this is configurable. 
+		//Otherwise this just adds overhead with no benefit. 
+		LoadedLibrary sf_lib ;
 		std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
-		if(sf_lib.handle){
-			if(sf_lib.functions.size() > 0){//TODO 
-				score_functions = sf_lib.functions;
+		// LoadedLibrary sf_lib = load_scoring_functions("./vp/build/lib/libfunctions.so");
+		// std::array<ScoreFunction, SF_BATCH_SIZE> score_functions;
+		// if(sf_lib.handle){
+		// 	if(sf_lib.functions.size() > 0){//TODO 
+		// 		score_functions = sf_lib.functions;
 
-				// Access the score_functions array and call the functions
-				std::cout << "Testing loaded score functions: " << std::endl;
-				for (const auto& func : score_functions) {
-					std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
-				}
+		// 		// Access the score_functions array and call the functions
+		// 		// std::cout << "Testing loaded score functions: " << std::endl;
+		// 		// for (const auto& func : score_functions) {
+		// 		// 	std::cout << "Test Score: " << func({Opcode::Mapping::ADD, Opcode::Mapping::ADD, 100, 8, 0, 3, 2, 1, 1, 0}) << std::endl;
+		// 		// }
 
-				// {
-				//     [](ScoreParams p) -> float {
-				// 		float score = ((p.length * p.weight) * p.score_multiplier 
-				// 			+ p.weight * p.score_bonus); //length * minimum_weight;
-				// 		return score;
-				// 	},
-				//     [](ScoreParams p) -> float {
-				// 		float score = ((p.length * p.weight) * p.score_multiplier 
-				// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
-				// 		return score;
-				// 	},
-				//     [](ScoreParams p) -> float {
-				// 		float score = ((p.length * p.weight) * p.score_multiplier 
-				// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
-				// 		return score;
-				// 	}
-				// };
-			}else{
-				std::cout << "Error loading scoring functions from library\nSkipping additional scoring functions" << std::endl;
-			}
-		}else{
-			std::cout << "Could not find library at default path\nSkipping additional scoring functions" << std::endl;
-		}
+		// 		// {
+		// 		//     [](ScoreParams p) -> float {
+		// 		// 		float score = ((p.length * p.weight) * p.score_multiplier 
+		// 		// 			+ p.weight * p.score_bonus); //length * minimum_weight;
+		// 		// 		return score;
+		// 		// 	},
+		// 		//     [](ScoreParams p) -> float {
+		// 		// 		float score = ((p.length * p.weight) * p.score_multiplier 
+		// 		// 			+ p.weight * p.score_bonus) / (1 + p.dep_score); 
+		// 		// 		return score;
+		// 		// 	},
+		// 		//     [](ScoreParams p) -> float {
+		// 		// 		float score = ((p.length * p.weight) * p.score_multiplier 
+		// 		// 			+ p.weight * p.score_bonus) * (p.num_children + 1);
+		// 		// 		return score;
+		// 		// 	}
+		// 		// };
+		// 	}else{
+		// 		std::cout << "Error loading scoring functions from library\nSkipping additional scoring functions" << std::endl;
+		// 	}
+		// }else{
+		// 	std::cout << "Could not find library at default path\nSkipping additional scoring functions" << std::endl;
+		// }
 		
 
 	
@@ -2995,9 +3005,11 @@ void ISS::show() {
 				if (mode == 'r') {
 					// Reload the library and get the updated array of functions
 					// Clear any copies of std::function so their destructors won't call into the unloaded library
-					for (auto &f : score_functions) f = nullptr;
-					for (auto &f : sf_lib.functions) f = nullptr;
-					if (sf_lib.handle) dlclose(sf_lib.handle);
+					if(sf_lib.handle){
+						for (auto &f : score_functions) f = nullptr;
+						for (auto &f : sf_lib.functions) f = nullptr;
+						dlclose(sf_lib.handle);
+					}
 					std::string library_path = 
 						"./vp/build/lib/libfunctions.so"; //+ std::to_string(run_id)
 					sf_lib = load_scoring_functions(library_path);
@@ -3026,9 +3038,11 @@ void ISS::show() {
 				} 
 				else if (mode == 'q') {
 					// Clear copied scoring functions before closing the library
-					for (auto &f : score_functions) f = nullptr;
-					for (auto &f : sf_lib.functions) f = nullptr;
-					if (sf_lib.handle) dlclose(sf_lib.handle);
+					if(sf_lib.handle){
+						for (auto &f : score_functions) f = nullptr;
+						for (auto &f : sf_lib.functions) f = nullptr;
+						dlclose(sf_lib.handle);
+					}
 					break;
 				} 
 				else if (mode == 'p') {
@@ -3065,9 +3079,9 @@ void ISS::show() {
 		
 		//close library
 		// Ensure we clear function objects before unloading the library to avoid calling into unloaded code
-		for (auto &f : score_functions) f = nullptr;
-		for (auto &f : sf_lib.functions) f = nullptr;
 		if(sf_lib.handle){
+			for (auto &f : score_functions) f = nullptr;
+			for (auto &f : sf_lib.functions) f = nullptr;
 			dlclose(sf_lib.handle);
 		}
 	}

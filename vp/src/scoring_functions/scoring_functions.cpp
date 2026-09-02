@@ -24,18 +24,18 @@
 	std::array<std::function<float(ScoreParams)>, 3> score_functions = {
         [](ScoreParams p) -> float {
 			// printf("test\n\n\n\n");
-			float score = ((p.length * p.weight) * p.score_multiplier 
-				+ p.weight * p.score_bonus); //length * minimum_weight;
-			return score;
+			double score = ((static_cast<double>(p.length) * static_cast<double>(p.weight)) * p.score_multiplier 
+				+ static_cast<double>(p.weight) * p.score_bonus); //length * minimum_weight;
+			return static_cast<float>(score);
 		},
         [](ScoreParams p) -> float {
-			float score = ((p.length * p.weight) * p.score_multiplier 
-				+ p.weight * p.score_bonus) / (1 + p.dep_score); 
-			return score;
+			double score = ((static_cast<double>(p.length) * static_cast<double>(p.weight)) * p.score_multiplier 
+				+ static_cast<double>(p.weight) * p.score_bonus) / (1 + p.dep_score); 
+			return static_cast<float>(score);
 		},
         [](ScoreParams p) -> float {
-			float score = ((p.length * p.weight) * p.score_multiplier 
-				+ p.weight * p.score_bonus) * (p.num_children + 1);
-			return score;
+			double score = ((static_cast<double>(p.length) * static_cast<double>(p.weight)) * p.score_multiplier 
+				+ static_cast<double>(p.weight) * p.score_bonus) * (p.num_children + 1);
+			return static_cast<float>(score);
 		}
     };
