@@ -286,7 +286,7 @@ struct Path
 		uint32_t num_children = 0; //TODO end_of_sequence test for type and count children  
 		uint32_t inputs = 0; //TODO
 		uint32_t outputs = 0; //TODO 
-		uint64_t sequence_weight = true_weight > 0 ? true_weight : minimum_weight;
+		uint64_t sequence_weight = minimum_weight; //use minimum weight for now, switch to true_weight after proerly verifying the behavior
 		ScoreParams params = {opcodes.back(), opcodes[0], 
 		sequence_weight, length, inverse_dependency_score, 
 		num_children, inputs, outputs, score_multiplier, score_bonus};
