@@ -477,8 +477,9 @@ class InstructionNode{
 
 		//last step id this node occurred in
 		//used to lock true_weight  to prevent counting the same path multiple times
-		//update last_occurrence when true_weight is updated 
-		//true weight is updated if current step id > last_occurrence + depth
+		//update last_occurrence when true_weight is updated
+		//a node at this depth ends a window of depth+1 instructions, so the next window is
+		//disjoint from the last counted one only if its step id > last_occurrence + depth
 		uint64_t last_occurrence = 0;
 
 		uint64_t total_cycles = 0;
@@ -864,8 +865,12 @@ class InstructionNode{
 			total_cycles += p.cycles;
 			//sum_step_ids += p.step; //TODO add curent step
 			
-			// Update true_weight only if this sequence was not already counted
-			if ((last_occurrence + depth) <= p.step) {
+			// Update true_weight only if this window does not overlap the last counted one.
+			// p.step is the step id of the window's last instruction and the window is
+			// depth+1 instructions long, so it must start after the last counted one ended.
+			// The first occurrence is always counted: it can end at step id depth, which the
+			// comparison alone would reject.
+			if (true_weight == 0 || (last_occurrence + depth) < p.step) {
 				true_weight++;
 				last_occurrence = p.step;
 			}
