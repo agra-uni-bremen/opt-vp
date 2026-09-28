@@ -29,6 +29,9 @@ Options::Options(void) {
 		("top-n", po::value<unsigned int>(&top_n)->default_value(10), "top N sequences to export")
 		("trace-depth", po::value<unsigned int>(&instruction_tree_depth), "length of the traced instruction sequences (default and maximum: the compiled INSTRUCTION_TREE_DEPTH)")
 		("similarity", po::value<float>(&similarity_threshold)->default_value(0.2f), "similarity threshold for filtering top sequences")
+		//accepted but inert. It was a prototype for recording extra, expensive attributes for
+		//sequences picked out by an earlier run, identified by their path hash. Nothing reads it.
+		("path-hashes", po::value<std::vector<uint64_t>>()->multitoken(), "reserved, currently has no effect")
 		("reduce-graph,r", po::value<float>(&graph_branch_threshold)->default_value(0.05f), "dot export: omit branches carrying less than this share of their tree's weight (0 draws every branch)")
 		("interactive,i", po::bool_switch(&interactive_mode), "Instead of exiting after the simulation has finished, keep the internal state and wait for commands")
 		("suppress-prompts", po::bool_switch(&suppress_prompts), "suppress interactive prompts")

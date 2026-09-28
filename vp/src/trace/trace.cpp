@@ -49,17 +49,9 @@ void set_trace_depth(uint32_t depth){
 	trace_depth = depth;
 }
 
-inline uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash){
-	return ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
-}
-
 //InstructionNodeR
 InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash)
 			: InstructionNode(instruction, parent_hash){
-				// for (size_t i = 0; i < INSTRUCTION_TREE_DEPTH; i++)//TODO remove should already be 0 initialized
-				// 	{
-				// 		dependencies_true_[i] = false;
-				// 	}
 }
 
 void InstructionNodeR::insert_rb(
@@ -622,8 +614,7 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 		uint dependencies_count = 0;
 		for (size_t i = 0; i < trace_depth; i++)
 		{
-			//printf("[%d]", dependencies_true_[i]);
-			if(dependencies_true_[i]){
+			if(depends_true_on(i)){
 			// if(i>depth){
 			// 	printf("error\n");
 			// }
@@ -645,7 +636,6 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 		/*uint register_count = 0;
 		for (size_t i = 0; i < 32; i++) //Number of registers
 		{
-			//printf("[%d]", dependencies_true_[i]);
 			if([i]){
 			// if(i>depth){
 			// 	printf("error\n");
@@ -1319,7 +1309,7 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 		uint dependencies_count = 0;
 		for (size_t i = 0; i < trace_depth; i++)
 		{
-			if(dependencies_true_[i]){
+			if(depends_true_on(i)){
 				dependencies_count++;
 				dot_stream << "<FONT COLOR=\"" 
 				<< dot_hue(depth-i) << " " << dot_sat(depth-i,0) << " " << dot_val(depth,0) << "\">" 
@@ -1707,7 +1697,8 @@ NODE_TYPE InstructionNodeMemoryLeaf::get_node_type(){
 
 PathNode::PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, 
 					std::map<uint64_t, int> pcs, 
-					std::array<bool, INSTRUCTION_TREE_DEPTH> dep_true, std::set<int8_t> dep_out, std::set<int8_t> dep_anti) {
+					const std::array<bool, INSTRUCTION_TREE_DEPTH> &dep_true,
+					std::set<int8_t> dep_out, std::set<int8_t> dep_anti) {
         instruction = instr;
         weight = wt;
         score_bonus = score_b;

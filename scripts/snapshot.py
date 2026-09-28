@@ -27,6 +27,16 @@ Take one before a change that could move any of those numbers and one after:
 not use the same settings, because a difference in trace depth or in the build
 type changes every number and is not a result.
 
+Two snapshots of the same build, taken minutes apart, differ by roughly half a
+percent on some machines, and the difference tends to be in one direction
+because the machine warms up. So a single comparison cannot resolve a change
+under about one percent. When the exact answer matters, bracket it: snapshot before,
+make the change, snapshot after, then revert and snapshot again. The two
+before-snapshots bound the drift, and anything smaller than that gap is not a
+result.
+
+A performance regression that is almost indistinguishable from noise is acceptable if it brings real improvements of e.g. readability or maintainability. 
+
 Commit the snapshot.
 
 Options:

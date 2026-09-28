@@ -67,13 +67,12 @@
 #define trace_branch_outcomes
 #endif
 
-//also track parameters on the root node of a tree. Costs one entry per pc executing that opcode
-//(the root of a tree is reached by every occurrence of its instruction), so it is off by default.
-//enable with -DTRACE_ROOT_PARAMETERS
-//temporarily hardcode this as ON
-// #ifdef TRACE_ROOT_PARAMETERS
+//also record parameters on the root node of a tree. Every occurrence of an instruction reaches
+//the root of its tree, so this costs one parameter entry per pc executing that opcode.
+//on by default; -DTRACE_ROOT_PARAMETERS=OFF drops it, which shrinks traces and speeds up tracing
+#ifdef TRACE_ROOT_PARAMETERS
 #define trace_root_parameters
-// #endif
+#endif
 
 //#define dot_pc_on_pruned_nodes
 
@@ -370,8 +369,9 @@ struct PathNode {
 
     // Constructor to initialize from an InstructionNode
     PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, 
-				std::map<uint64_t, int> pcs, std::array<bool, 
-				INSTRUCTION_TREE_DEPTH> dep_true, std::set<int8_t> dep_out, std::set<int8_t> dep_anti);
+				std::map<uint64_t, int> pcs,
+				const std::array<bool, INSTRUCTION_TREE_DEPTH> &dep_true,
+				std::set<int8_t> dep_out, std::set<int8_t> dep_anti);
 
 	nlohmann::json to_json() const;
 };
@@ -458,7 +458,6 @@ struct RegisterSetCounter {
 	#endif
 };
 
-uint64_t hash_tree(Opcode::Mapping instruction, uint64_t parent_hash);
 
 class InstructionNode{
 	public:
@@ -492,17 +491,35 @@ class InstructionNode{
 		//dividing by weight results in the average region of the programs lifetime this node occurs most frequently
 		//uint64_t sum_step_ids = 0;
 		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
-		//array of negative offsets to last node that writes to rs1 or rs2 (1=this node depends on tree[current-index])
-		//very likely this only marks 2 values for longer (unique) paths
-		//must be zero initialized here: a node is created with new, which leaves a plain member
-		//array indeterminate, and the garbage shows up as dependencies that never occurred
-		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_ = {}; //value at offset 0 is ignored
+		//entry i is set when this node reads a value written i instructions earlier in the window
+		//(1 = written by the parent). Entry 0 is never set: a node does not depend on itself.
+		//a byte per offset rather than a bit mask: the two writes on the insert path are then
+		//independent stores instead of a read-modify-write of one shared word, which measures
+		//about 1.5 percent faster over the embench set. Must be zero initialized here, because
+		//a node is created with new and a plain member array would be left indeterminate.
+		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_ = {};
 		//index of other nodes this node has a anti/output dependency to
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_output_;
 
 		std::bitset<32> inputs_;
 		std::bitset<32> outputs_;
+
+		//! Does this node read a value written `offset` instructions earlier in the window?
+		bool depends_true_on(size_t offset) const {
+			return dependencies_true_[offset];
+		}
+
+		//! How many earlier instructions in the window this node reads a value from.
+		uint32_t true_dependency_count() const {
+			uint32_t count = 0;
+			for (size_t i = 0; i < trace_depth; i++) {
+				if (dependencies_true_[i]) {
+					count++;
+				}
+			}
+			return count;
+		}
 
 
 		#ifdef trace_individual_registers
@@ -537,13 +554,7 @@ class InstructionNode{
 			return 0.0;
 		#else
 			//check for any dependencies
-			uint64_t dependencies_count = 0;
-			for (size_t i = 0; i < trace_depth; i++)
-			{
-			if(dependencies_true_[i]){
-				dependencies_count++;
-			}
-			}
+			uint64_t dependencies_count = true_dependency_count();
 
 			if(dependencies_count>0){
 				return -(float)dependencies_count/10.0;
@@ -607,7 +618,7 @@ class InstructionNode{
 			//TODO: include depth so we do not have to iterate over unnecessary empty entries
 			for (size_t i = 1; i < trace_depth; i++)
 			{
-			if(dependencies_true_[i]){
+			if(depends_true_on(i)){
 				result += 1/(double)i; //i should never be 0 as a node does not depend on itself
 			}
 			if(dependencies_output_[i]){
@@ -624,14 +635,7 @@ class InstructionNode{
 		}
 
 		uint32_t count_true_dependencies(){
-			uint32_t result = 0;
-			for (size_t i = 0; i < trace_depth; i++)
-			{
-			if(dependencies_true_[i]){
-				result++;
-			}
-			}
-			return result;
+			return true_dependency_count();
 		}
 
 		void print(){
@@ -713,7 +717,7 @@ class InstructionNode{
 			std::set<int8_t> output_dependencies;
 
 			for (size_t i = 1; i < trace_depth; i++){
-					if(dependencies_true_[i]){
+					if(depends_true_on(i)){
 						true_dependencies.push_back(i);
 					}
 					if (dependencies_anti_[i]) {
@@ -790,7 +794,7 @@ class InstructionNode{
 					<< -1 << ";" //cycles used by sequence for one iteration
 					<< current_dep_score << ";"
 					<< current_total_dep_score << ";"
-					<< current_true_dep << ";" //dependencies_true_ TODO convert to bitset
+					<< current_true_dep << ";"
 					<< current_anti_dep << ";"
 					<< current_out_dep << ";"
 					<< total_true_dep << ";" 
@@ -1010,7 +1014,6 @@ class InstructionNode{
 					indices_out.insert(i);
 				}
 			}
-			//PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, std::map<uint64_t, int> pcs, std::array<bool, INSTRUCTION_TREE_DEPTH> deps) {
 			PathNode n = PathNode(instruction, weight, get_score_bonus(), get_score_multiplier(), get_inv_dep_score(), 
 									get_pc(), 
 									dependencies_true_, indices_out, indices_anti);

@@ -107,7 +107,7 @@ $ cmake -S vp -B vp/build -DINSTRUCTION_TREE_DEPTH=8
 | `-DNO_TRACE_PARAMETER_IMMEDIATES=ON` | do not record decoded immediates |
 | `-DNO_TRACE_PREDECESSOR_PCS=ON` | do not record predecessor pcs |
 | `-DNO_TRACE_BRANCH_OUTCOMES=ON` | do not record per pc branch outcomes |
-| `-DTRACE_ROOT_PARAMETERS=ON` | also record parameters on the root node of each tree |
+| `-DTRACE_ROOT_PARAMETERS=OFF` | do not record parameters on the root node of each tree (on by default) |
 
 ## Publications  
 The concepts behind the Opt-VP are further described in the following publications:  
