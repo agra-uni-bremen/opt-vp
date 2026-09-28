@@ -1,4 +1,4 @@
-#include "trace_analysis.h"
+#include "analysis.h"
 
 #include <algorithm>
 #include <cstdio>

@@ -11,7 +11,7 @@
 #include <vector>
 
 struct LoadedLibrary {
-	void* handle;  // Handle to the loaded library
+	void* handle = nullptr;
 	std::array<ScoreFunction, SF_BATCH_SIZE> functions;
 };
 

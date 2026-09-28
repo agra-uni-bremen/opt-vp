@@ -12,7 +12,7 @@
 #include "syscall_if.h"
 #include "util/common.h"
 
-#include "trace.h"
+#include "trace/trace.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -187,7 +187,6 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	int64_t lr_sc_counter = 0;
 	uint64_t total_num_instr = 0;
 
-	bool is_single_file = false;
 	bool output_as_dot = false;
 	bool output_as_csv = false;
 	bool output_as_json = false;
@@ -418,18 +417,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	void run() override;
 
-	void flush_ringbuffer();
-
-	void output_dot(std::streambuf *cout_save);
-	void output_csv(std::streambuf *cout_save);
-	void output_coverage_csv(const std::vector<Path>& sequences,
-			std::function<float(const ScoreParams)> score_function);
-	void output_json(std::streambuf *cout_save, 
-		std::vector<std::vector<PathNode>> discovered_sequences_node_list, 
-		std::vector<std::vector<std::vector<PathNode>>> discovered_sub_sequences_node_lists, 
-		std::vector<std::vector<std::vector<PathNode>>> discovered_variant_sequences_node_lists);
-	void output_full(std::streambuf *cout_save);
-
+	//! Print the register file, then hand the trees to the trace library. The analysis and
+	//! every export live in vp/src/trace/, not here.
 	void show();
 };
 

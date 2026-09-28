@@ -1744,7 +1744,7 @@ PathNode::PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float scor
 		}
 }
 
-nlohmann::json PathNode::to_json(){
+nlohmann::json PathNode::to_json() const {
 		nlohmann::json jsonNode;
 		jsonNode["instruction"] = Opcode::mappingStr[instruction];
 		jsonNode["weight"] = weight;

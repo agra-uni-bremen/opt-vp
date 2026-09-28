@@ -20,3 +20,7 @@ nbproject/
 sw/basic-gcov/main.*
 sw/**/*.o
 out/
+
+# Python bytecode from the tools under scripts/ and tests/
+__pycache__/
+*.pyc

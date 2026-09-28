@@ -5,7 +5,6 @@
 #include <cassert>
 #include <stdexcept>
 
-#include "trace.h"
 
 constexpr uint32_t LUI_MASK = 0b00000000000000000000000001111111;
 constexpr uint32_t LUI_ENCODING = 0b00000000000000000000000000110111;

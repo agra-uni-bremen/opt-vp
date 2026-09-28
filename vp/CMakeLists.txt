@@ -20,8 +20,13 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wpedantic")
-set(CMAKE_CXX_FLAGS_DEBUG "-g3")        #"-fsanitize=address -fno-omit-frame-pointer"
+# Keep whatever the caller passed in -DCMAKE_CXX_FLAGS and only add the warnings on top.
+# Overwriting the variable silently dropped every flag given on the command line, which made
+# it impossible to build with a sanitizer or with -g.
+#   cmake -S vp -B vp/build-asan -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+#         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wpedantic ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG "-g3")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 if(INSTRUCTION_TREE_DEPTH)
@@ -64,8 +69,17 @@ add_test(NAME sw
 	COMMAND ./test.sh
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/../sw")
 
+# Checks that the trace the VP writes is the trace it wrote before. This is the one
+# to run after every change; it takes about two seconds and needs no cross compiler,
+# only the example programs under sw/ to have been built once.
+add_test(NAME trace
+	COMMAND ./test.sh
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/../tests/trace")
+
 set_tests_properties(gdb integration sw PROPERTIES ENVIRONMENT
 	PATH=$ENV{PATH}:${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+set_tests_properties(trace PROPERTIES ENVIRONMENT
+	VP_BIN_DIR=${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_tests_properties(libgdb PROPERTIES ENVIRONMENT
 	RISCV_VP_BASE=${CMAKE_CURRENT_SOURCE_DIR}/..)
 

@@ -1,0 +1,67 @@
+name: build and check the trace
+
+on:
+  push:
+    branches: [main, future]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libboost-all-dev \
+            gcc-riscv64-unknown-elf
+
+      # The trace programs are hand written assembly in the base ISA with no library calls,
+      # so the multilib bare metal compiler builds them with -nostdlib. `make` in sw/ expects
+      # riscv32-unknown-elf- and riscv64-unknown-elf- prefixes; Debian ships only the 64 bit
+      # names, so link the 32 bit ones to them.
+      - name: put the cross compiler under the names sw/ expects
+        run: |
+          mkdir -p "${HOME}/cross"
+          for tool in gcc g++ as ld objdump readelf; do
+            if command -v "riscv64-unknown-elf-${tool}" >/dev/null; then
+              ln -sf "$(command -v "riscv64-unknown-elf-${tool}")" "${HOME}/cross/riscv32-unknown-elf-${tool}"
+            fi
+          done
+          echo "${HOME}/cross" >> "${GITHUB_PATH}"
+
+      - name: configure
+        run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: build
+        run: cmake --build vp/build --target essential tiny64-vp --parallel "$(nproc)"
+
+      # These programs are assembly in the base ISA and link with -nostdlib, so they need no
+      # C library. Cases whose program does need one are marked "ci": false in cases.json and
+      # are left out below by --ci.
+      - name: build the trace test programs
+        run: |
+          for program in trace-test-minimal trace-test-default trace-test-memory \
+                         trace-test-output-dep trace-test-prefix trace-test-minimal-rv64; do
+            make -C "sw/${program}"
+          done
+
+      - name: check the trace against the reference
+        run: python3 tests/trace/check.py --ci
+        env:
+          VP_BIN_DIR: ${{ github.workspace }}/vp/build/bin
+
+      # A failed check keeps the output it produced. Upload it so the difference can be
+      # looked at without reproducing the run.
+      - name: keep the produced trace when the check failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-output
+          path: out/trace-check
+          if-no-files-found: ignore

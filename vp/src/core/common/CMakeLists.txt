@@ -4,8 +4,6 @@ add_library(core-common
 		timer.cpp
 		real_clint.cpp
 		instr.cpp
-		trace.cpp
-		trace_analysis.cpp
 		debug_memory.cpp
 		rawmode.cpp
 		${HEADERS})

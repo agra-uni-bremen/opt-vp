@@ -1,6 +1,6 @@
 #pragma once
 
-#include "instr.h"
+#include "core/common/instr.h"
 #include <set>
 #include <unordered_set>
 #include <unordered_map>
@@ -37,7 +37,6 @@
 
 #define trace_pcs
 #define log_pcs
-//#define output_stats //output a summary of the VP analysis 
 // #define debug_register_dependencies
 //#define debug_dependencies
 // #define handle_self_modifying_code
@@ -337,8 +336,6 @@ struct Path
 
 		std::cout << prefix << "Last Path Hash: " << path_hashes.back() << std::endl;
 	}
-
-	void to_csv_stats(std::ostream& output_file, uint64_t total_instructions) const;
 };
 
 
@@ -371,7 +368,7 @@ struct PathNode {
 				std::map<uint64_t, int> pcs, std::array<bool, 
 				INSTRUCTION_TREE_DEPTH> dep_true, std::set<int8_t> dep_out, std::set<int8_t> dep_anti);
 
-	nlohmann::json to_json();
+	nlohmann::json to_json() const;
 };
 
 struct CsvParams {
@@ -1091,30 +1088,6 @@ class InstructionNodeLeaf : virtual public InstructionNode{
 	std::map<uint64_t, int> get_pc() override;
 	NODE_TYPE get_node_type() override;
 };
-
-inline void Path::to_csv_stats(std::ostream& output_file, uint64_t total_instructions) const {
-	for (auto&& opcode : opcodes) {
-		const char* opcode_string = "UNKWN ";
-		output_file << "\"";
-		if (opcode < Opcode::mappingStr.size()) {
-			opcode_string = Opcode::mappingStr[opcode];
-		}
-		output_file << opcode_string << " -> ";
-	}
-	output_file << "\"";
-	uint64_t true_weight = 0;
-	if (end_of_sequence) {
-		true_weight = end_of_sequence->true_weight;
-	}
-	double coverage = 0.0;
-	if (total_instructions > 0) {
-		coverage = (static_cast<double>(length) * static_cast<double>(true_weight)) /
-			static_cast<double>(total_instructions);
-	}
-	output_file << ";" << length << ";" << minimum_weight
-		<< ";" << get_score([](const ScoreParams p) { return p.length * p.weight; })
-		<< ";" << path_hashes.back() << ";" << coverage << "\n";
-}
 
 class MemoryNode{
 	public: 
