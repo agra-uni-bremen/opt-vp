@@ -4,9 +4,8 @@
 #include <fstream>
 #include <iostream>
 
-// Moved from ISS::output_json and ISS::output_full. Unlike the dot and csv exporters these
-// build a JSON value and write it in one place, so they write to their own stream and do
-// not redirect std::cout.
+// Both exporters build a complete JSON value and then write it, so they use their own stream
+// and leave `std::cout` alone.
 
 void export_sequences(const TraceReport &report,
                       const std::vector<std::vector<PathNode>> &sequences,
@@ -47,15 +46,15 @@ void export_sequences(const TraceReport &report,
 	}
 	printf("\n");
 
-	if (report.output_directory.empty()) {
+	if (report.config.output_directory.empty()) {
 		std::cout << top_level_json.dump(JSON_INDENT) << std::endl;
 		return;
 	}
 
-	std::string single_output_filename = report.output_directory + std::string("sequences_") +
-	                                     program_basename(report.input_program) +
-	                                     std::string(".json");
-	std::cout << "writing json to directory " << report.output_directory << std::endl;
+	std::string single_output_filename = report.config.output_directory + std::string("sequences_") +
+	                                     program_basename(report.config.input_program) +
+	                                     hart_suffix(report.config) + std::string(".json");
+	std::cout << "writing json to directory " << report.config.output_directory << std::endl;
 	std::cout << "Sequence file: " << single_output_filename << std::endl;
 
 	std::ofstream output(single_output_filename);
@@ -63,13 +62,13 @@ void export_sequences(const TraceReport &report,
 }
 
 void export_trees(const TraceReport &report) {
-	std::cout << "writing json to directory " << report.output_directory << std::endl;
+	std::cout << "writing json to directory " << report.config.output_directory << std::endl;
 
-	std::string application_name = program_basename(report.input_program);
-	for (InstructionNodeR &tree : *report.trees) {
-		std::string single_output_filename = report.output_directory + application_name +
+	std::string application_name = program_basename(report.config.input_program);
+	for (InstructionNodeR &tree : report.trees) {
+		std::string single_output_filename = report.config.output_directory + application_name +
 		                                     std::string(Opcode::mappingStr[tree.instruction]) +
-		                                     std::string(".json");
+		                                     hart_suffix(report.config) + std::string(".json");
 
 		nlohmann::ordered_json tree_json = nlohmann::ordered_json::object();
 		// the format version goes first so a reader can dispatch on it before parsing the tree

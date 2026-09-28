@@ -706,7 +706,7 @@ std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char*
 					depth + 1, child_index, subtree_hash, 
 					dot_stream, connections_stream, 
 					tree_weight,total_instructions,
-					true, 0.05);
+					reduce_graph_output, branch_omission_threshold);
 		child_index ++;
 	}
 
@@ -1381,7 +1381,7 @@ std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const 
 					depth + 1, child_index, subtree_hash, 
 					dot_stream, connections_stream, 
 					tree_weight,total_instructions,
-					true, 0.05);
+					reduce_graph_output, branch_omission_threshold);
 		child_index ++;
 	}
 

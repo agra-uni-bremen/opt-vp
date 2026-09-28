@@ -9,17 +9,17 @@
 
 
 void export_csv(const TraceReport &report) {
-	if (report.output_directory.empty()) {
+	if (report.config.output_directory.empty()) {
 		std::cout << "[ERROR] No output directory set for csv export" << std::endl;
 		return;
 	}
 
 	std::streambuf *cout_save = std::cout.rdbuf();
-	std::string application_name = program_basename(report.input_program);
+	std::string application_name = program_basename(report.config.input_program);
 
-	std::cout << "writing csv files to directory " << report.output_directory << std::endl;
-	std::string single_output_filename = report.output_directory + std::string("Execution_Trees_") +
-	                                     application_name + std::string(".csv");
+	std::cout << "writing csv files to directory " << report.config.output_directory << std::endl;
+	std::string single_output_filename = report.config.output_directory + std::string("Execution_Trees_") +
+	                                     application_name + hart_suffix(report.config) + std::string(".csv");
 	std::ofstream output(single_output_filename);
 	std::cout.rdbuf(output.rdbuf());
 
@@ -59,12 +59,12 @@ void export_csv(const TraceReport &report) {
 
 	std::map<InstructionType, uint32_t> instruction_types;
 	uint64_t total_max_weight = 0;
-	for (InstructionNodeR &tree : *report.trees) {
+	for (InstructionNodeR &tree : report.trees) {
 		if (tree.weight > total_max_weight) {
 			total_max_weight = tree.weight;
 		}
 	}
-	for (InstructionNodeR &tree : *report.trees) {
+	for (InstructionNodeR &tree : report.trees) {
 		tree.to_csv({
 		    report.retired_instructions,
 		    Opcode::mappingStr[tree.instruction],
@@ -85,14 +85,14 @@ void export_csv(const TraceReport &report) {
 
 void export_coverage_csv(const TraceReport &report, const std::vector<Path> &sequences,
                          const std::function<float(const ScoreParams)> &score_function) {
-	if (!report.write_coverage_csv || report.coverage_csv_file.empty()) {
+	if (!report.config.write_coverage_csv || report.config.coverage_csv_file.empty()) {
 		return;
 	}
 
 	// A relative path is taken as relative to the output directory, an absolute one as-is.
-	std::string output_path = report.coverage_csv_file;
-	if (output_path[0] != '/' && !report.output_directory.empty()) {
-		output_path = report.output_directory + output_path;
+	std::string output_path = report.config.coverage_csv_file;
+	if (output_path[0] != '/' && !report.config.output_directory.empty()) {
+		output_path = report.config.output_directory + output_path;
 	}
 
 	std::ofstream output(output_path);

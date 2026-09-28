@@ -8,9 +8,6 @@
 #include <iostream>
 #include <vector>
 
-// Moved from ISS::show() and ISS::flush_ringbuffer(), which existed once per architecture
-// and had already drifted apart. Nothing here depends on the register width.
-
 namespace {
 
 //! The score the report ranks sequences by: how many instructions the sequence covers.
@@ -55,7 +52,7 @@ size_t count_unused_instructions(std::list<InstructionNodeR> &trees) {
  * on also collect its sub sequences and its branch variants.
  *
  * The sub sequence and variant work is the expensive part and runs only for the sequence
- * export, which is what `report.write_sequences` guards.
+ * export, which is what `report.config.write_sequences` guards.
  */
 void collect_sequence_nodes(TraceReport &report, const std::vector<Path> &sequences,
                             const ScoreFunction &score,
@@ -65,7 +62,7 @@ void collect_sequence_nodes(TraceReport &report, const std::vector<Path> &sequen
 	printf("\n -----------------\n| Best Sequences |\n -----------------\n");
 
 	for (const Path &p : sequences) {
-		InstructionNodeR *found_tree = find_tree(*report.trees, p.opcodes[0]);
+		InstructionNodeR *found_tree = find_tree(report.trees, p.opcodes[0]);
 		if (found_tree == nullptr) {
 			// This should never happen: a path exists only because a tree held it.
 			printf("[ERROR] Could not find matching tree for discovered path\nOpcode: %s\n",
@@ -73,12 +70,11 @@ void collect_sequence_nodes(TraceReport &report, const std::vector<Path> &sequen
 			continue;
 		}
 
-		// The order below is the order ISS::show() used. path_to_path_nodes and
-		// find_variant_branch both walk the tree, so it is kept rather than tidied.
+		// path_to_path_nodes and find_variant_branch both walk the tree, so keep this order.
 		std::vector<PathNode> full_path = found_tree->path_to_path_nodes(p, 0);
 
 		std::vector<BranchingPoint> variant_starting_points;
-		if (report.write_sequences) {
+		if (report.config.write_sequences) {
 			variant_starting_points = found_tree->find_variant_branch(p, 0);
 			// sort variant starting points, so we can extend the top N
 			std::sort(variant_starting_points.begin(), variant_starting_points.end(),
@@ -94,7 +90,7 @@ void collect_sequence_nodes(TraceReport &report, const std::vector<Path> &sequen
 
 		out_sequences.push_back(full_path);
 
-		if (!report.write_sequences) {
+		if (!report.config.write_sequences) {
 			continue;
 		}
 
@@ -148,39 +144,20 @@ std::string program_basename(const std::string &path) {
 	return path.substr(path.find_last_of("/\\") + 1);
 }
 
-void flush_ring_buffer(std::list<InstructionNodeR> &trees,
-                       std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> &steps,
-                       uint8_t &ring_buffer_index) {
-	// TODO check if this has to start at index 0
-	for (size_t offset = 1; offset < trace_depth; offset++) {
-		ring_buffer_index = (ring_buffer_index + 1) % trace_depth;
-
-		// advance ringbuffer index and insert current instruction into tree
-		// (as if it were the oldest entry)
-		Opcode::Mapping oldest_op = steps[ring_buffer_index].last_executed_instruction;
-		if (!oldest_op) {
-			continue;  // ring buffer was not completely filled, skip this entry
-		}
-
-		InstructionNodeR *found_tree = find_tree(trees, oldest_op);
-		if (found_tree == nullptr) {
-			trees.emplace_back(oldest_op, 0);
-			found_tree = &trees.back();
-		}
-		found_tree->insert_rb(steps, ring_buffer_index, offset);
-	}
+std::string hart_suffix(const TraceConfig &config) {
+	return config.hart_id == 0 ? std::string() : "-hart" + std::to_string(config.hart_id);
 }
 
 void run_trace_report(TraceReport &report) {
-	std::cout << "execution statistics: (" << report.trees->size() << " Trees)" << std::endl;
+	std::cout << "execution statistics: (" << report.trees.size() << " Trees)" << std::endl;
 
-	if (report.write_dot) {
+	if (report.config.write_dot) {
 		export_dot(report);
 	}
-	if (report.write_csv) {
+	if (report.config.write_csv) {
 		export_csv(report);
 	}
-	if (report.write_trees) {
+	if (report.config.write_trees) {
 		export_trees(report);
 	}
 
@@ -189,9 +166,9 @@ void run_trace_report(TraceReport &report) {
 	std::vector<Path> discovered_sequences;
 	printf("start analysis\n");
 	int tree_index = 0;
-	for (InstructionNodeR &tree : *report.trees) {
+	for (InstructionNodeR &tree : report.trees) {
 		std::vector<Path> top_paths = tree.extend_top_paths(
-		    {1, 0, 1.0, tree_index, -1, Opcode::Mapping::UNDEF, score}, report.coverage_top_n);
+		    {1, 0, 1.0, tree_index, -1, Opcode::Mapping::UNDEF, score}, report.config.coverage_top_n);
 		discovered_sequences.insert(discovered_sequences.end(), top_paths.begin(), top_paths.end());
 		tree_index++;
 		printf(".");
@@ -211,11 +188,11 @@ void run_trace_report(TraceReport &report) {
 		}
 	}
 
-	if (report.write_coverage_csv) {
+	if (report.config.write_coverage_csv) {
 		std::vector<Path> sequences_sorted = sorted_by_score_descending(discovered_sequences, score);
 		std::vector<Path> filtered = filter_top_sequences(sequences_sorted,
-		                                                  static_cast<size_t>(report.coverage_top_n),
-		                                                  report.coverage_similarity_threshold);
+		                                                  static_cast<size_t>(report.config.coverage_top_n),
+		                                                  report.config.coverage_similarity_threshold);
 		export_coverage_csv(report, filtered, score);
 	}
 
@@ -225,7 +202,7 @@ void run_trace_report(TraceReport &report) {
 	collect_sequence_nodes(report, discovered_sequences, score, sequence_nodes, sub_sequence_nodes,
 	                       variant_nodes);
 
-	if (report.write_sequences) {
+	if (report.config.write_sequences) {
 		export_sequences(report, sequence_nodes, sub_sequence_nodes, variant_nodes);
 	}
 
@@ -243,7 +220,7 @@ void run_trace_report(TraceReport &report) {
 		std::cout << "normalized potential " << best.get_normalized_score() * total_percent * 100
 		          << std::endl;
 
-		size_t unused = count_unused_instructions(*report.trees);
+		size_t unused = count_unused_instructions(report.trees);
 		std::cout << "\n[Unused Instructions]" << std::endl;
 		if (unused > 0) {
 			std::cout << unused << std::endl;
@@ -251,7 +228,7 @@ void run_trace_report(TraceReport &report) {
 			std::cout << "- NONE -" << std::endl;
 		}
 
-		if (report.interactive) {
+		if (report.config.interactive) {
 			run_interactive(report);
 		}
 	}

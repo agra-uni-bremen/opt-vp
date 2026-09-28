@@ -2,6 +2,8 @@
 
 // Architecture-independent helpers for analyzing/scoring discovered instruction sequences
 // (used by both the rv32 and rv64 ISS implementations).
+// Performing the whole Analysis on the VP is generally not recommended and should be done using RETrace. 
+//A basic coverage analysis is cheap though and can help spot problems with the traces or application. 
 
 #include "trace.h"
 
@@ -19,8 +21,8 @@ struct LoadedLibrary {
 // std::array<ScoreFunction, SF_BATCH_SIZE> and returns it together with the library handle.
 LoadedLibrary load_scoring_functions(const std::string& libraryPath);
 
-// Evaluates every provided score function against every instruction tree and prints the best
-// sequences found for each score function (used by the interactive analysis mode).
+// Evaluates every provided scoring function against every instruction tree and prints the best
+// sequences found for each scoring function (used by the interactive analysis mode).
 void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNodeR> instruction_trees);
 
 double similarity_jaccard_positions(const std::vector<Opcode::Mapping>& a, const std::vector<Opcode::Mapping>& b);

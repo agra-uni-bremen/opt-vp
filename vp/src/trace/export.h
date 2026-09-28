@@ -1,13 +1,11 @@
 #pragma once
 
-// The exporters. One per format.
+// The exporters, one per format.
 //
-// A note on `std::cout`. The dot and csv exporters still redirect `std::cout` at a file
-// while they run, because the node classes write through `std::cout` themselves
-// (`InstructionNodeR::tree_to_dot`, `to_csv`). Threading a stream through the node
-// hierarchy belongs with rewriting that hierarchy, so it is left for then. The two JSON
-// exporters, which build a value and write it in one place, take a stream and do not touch
-// `std::cout`.
+// The dot and csv exporters redirect `std::cout` at a file while they run, because the node
+// classes write their own output through `std::cout` (`InstructionNodeR::tree_to_dot`,
+// `to_csv`). Do not call them from anywhere that is also writing to standard output. The two
+// JSON exporters build a value and write it to their own stream, so they are safe anywhere.
 
 #include "trace/report.h"
 #include "trace/trace.h"

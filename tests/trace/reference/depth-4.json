@@ -1,0 +1,148 @@
+{
+ "case": "depth-4",
+ "counters": {
+  "cycles": 941,
+  "instructions": 821,
+  "retired": 821,
+  "trees": 18,
+  "unused_instructions": 126
+ },
+ "digest": "f89e78f1797180674b3cf63dfe90df36e69738cb31e6fe3f2ba5b42bc73f86ee",
+ "files": {
+  "mainADD.json": {
+   "bytes": 2514,
+   "raw_sha256": "3920233a94f1cfaa68e3e39c5ecdf72ba9ea8127a8b4c7c8cb1ad07a53ba7f37",
+   "semantic_sha256": "4893c80d8b3f3ba7b91d0d5a8987873ea27768067de11fd48c250d59ab232196"
+  },
+  "mainADDI.json": {
+   "bytes": 13590,
+   "raw_sha256": "fe930bd6749d5629ce301a0b2de3e4cb4804c9abf3a77f28e1996d3852a74089",
+   "semantic_sha256": "f12c1fe333fce46a6cfe6cab73b57ec8a7d16dcebf288b23d72206ffe791aeae"
+  },
+  "mainAND.json": {
+   "bytes": 1355,
+   "raw_sha256": "423f64db9ec42330ad0b8ae3a1e956be517c8fe8b6a49d6a8905f4a53958bbfb",
+   "semantic_sha256": "0957e5d35320467ddf01a27edf854d91788fb55c7141a6cf0177a7135969cf22"
+  },
+  "mainAUIPC.json": {
+   "bytes": 5809,
+   "raw_sha256": "a73a4e3c38011ad4fcb881d1e3f3010e421e796ed83d90b32df432ff911aa7a5",
+   "semantic_sha256": "dd02544df2081456afc2b05ce28206dcbdc1b417da78a5d9d62437d901cacbf1"
+  },
+  "mainBGE.json": {
+   "bytes": 4608,
+   "raw_sha256": "a69f6e2a57d139681167d9efe0597e6bab6260eb672c269677260ee35fee3f57",
+   "semantic_sha256": "61fc1119a06160a448420f791b842b81e803671ea6e51f0b002bcfc9dbe46523"
+  },
+  "mainECALL.json": {
+   "bytes": 339,
+   "raw_sha256": "ecb41e60bffb2602e614c0195afce69b9d5cb26da4f466eb18bafa90b56a24ce",
+   "semantic_sha256": "96ef2453ff0b654fa55b7a6523f6f061d432873a75607d14c8e494c6008185c1"
+  },
+  "mainJAL.json": {
+   "bytes": 3540,
+   "raw_sha256": "a39d1cbaccf0b15892654b65f17bdab5e24f89db8fab477acfec836d492b5f1f",
+   "semantic_sha256": "2261e96a6e4daefe8836c50d67ca6be8c05fa6d0f9c98ab5d6ad4f9599f78347"
+  },
+  "mainJALR.json": {
+   "bytes": 6832,
+   "raw_sha256": "94f32b36e6c2a2d8bd46a9bc9d8b15b0b3512e5ef089c12678171da62d6e1417",
+   "semantic_sha256": "e85df698a2ff81f7b9339aef4188b43ed68d951ed36f5f15a4e7d1d2b9dfb0a5"
+  },
+  "mainLW.json": {
+   "bytes": 1379,
+   "raw_sha256": "83b405eebb33d04021a8b08804471b4dd8c9c23cac1c39adee222a9a05277a20",
+   "semantic_sha256": "9850f9513149898cd0705c9e96de9fd3aae72f6c882feeb67902f2b3cb9eb1de"
+  },
+  "mainOR.json": {
+   "bytes": 1375,
+   "raw_sha256": "26249b7dbf1024b0109db478f62443006229fb9e280e3eb753ac33c680510c11",
+   "semantic_sha256": "01b2c9d41463a95d790f6df7a8c57547b0f0e54ca6befb9f6a9bc046c194446a"
+  },
+  "mainSLL.json": {
+   "bytes": 1395,
+   "raw_sha256": "6eeb3eb6919cd78dda3c1bc3d4579088d426dec4e6db8e4c5d522cd4dab351c6",
+   "semantic_sha256": "0ce5e3df0c5174c8d3393fbb1afbbcc0819a0e8510fb66568cf5e5314feb28ae"
+  },
+  "mainSLLI.json": {
+   "bytes": 5814,
+   "raw_sha256": "3d9c95e9add54a9973154d7500f828083d322ed32d39463509c2d28dc510fc75",
+   "semantic_sha256": "03df95666db3d028971dd8c3689f423c228acbb1cfb871cb804acfb2aa5a1250"
+  },
+  "mainSRA.json": {
+   "bytes": 1393,
+   "raw_sha256": "1ef9075c7ea99d371f2e25736a8aa32c0d2f44ff75b5948a3d60ffe4d13be60f",
+   "semantic_sha256": "636407f29f3a62d37cd79c6a78ce8e87c276c1666e7c3325252315f1bc3b4ffa"
+  },
+  "mainSRAI.json": {
+   "bytes": 1390,
+   "raw_sha256": "80feed00c4d33acf0c67cbf5b8292d7ce077c16083416d0daf0567f3ab568818",
+   "semantic_sha256": "b39f0512f4ef4e934500c93fff42aabbd51f0a9dd9998c7f8ba87294132fd5b7"
+  },
+  "mainSRL.json": {
+   "bytes": 1394,
+   "raw_sha256": "7d18d025e92cce0739f6ec21074f8db0e16f13b8528426d74b90eb28c1d0ba20",
+   "semantic_sha256": "60b73d99b685a7e3fc9f33529b684b19363e661bcf8cc1d2deac1715a52dab3d"
+  },
+  "mainSRLI.json": {
+   "bytes": 1390,
+   "raw_sha256": "ad8367e5e3d1a847f1ef3697298212a046675a41d64780f5c11ccfc20b6c98b8",
+   "semantic_sha256": "ebcf852df0a134b064a0e99d44736a0505e1763fc22ec7832331cacb46819335"
+  },
+  "mainSW.json": {
+   "bytes": 2050,
+   "raw_sha256": "b208bd7c3af6cb235db91f554bb919d7d3bbc7f053392b52ccbdd05a64492b36",
+   "semantic_sha256": "e5c84036ba23fcadca44b10f8c33c8ec7fd799ec8b20544f138fe0f33f127a74"
+  },
+  "mainXOR.json": {
+   "bytes": 2066,
+   "raw_sha256": "fabed2fdc58d649e1a168cae44d228088dea1628fe73a38458e155db198c9faa",
+   "semantic_sha256": "b9c821b8f0240bb6207b386a559a3c06f13afd3a03cfcf2738ef1b107d7ead1a"
+  }
+ },
+ "flags": [
+  "-e",
+  "--trace-depth",
+  "4"
+ ],
+ "program": "sw/trace-test-default",
+ "registers": [
+  {
+   "hart": 0,
+   "pc": 65892,
+   "x0": 0,
+   "x1": 65716,
+   "x10": 0,
+   "x11": 20,
+   "x12": 1,
+   "x13": 200,
+   "x14": 200,
+   "x15": 5,
+   "x16": 0,
+   "x17": 93,
+   "x18": 0,
+   "x19": 0,
+   "x2": 134217724,
+   "x20": 0,
+   "x21": 0,
+   "x22": 0,
+   "x23": 0,
+   "x24": 0,
+   "x25": 0,
+   "x26": 0,
+   "x27": 0,
+   "x28": 0,
+   "x29": 44040192,
+   "x3": 0,
+   "x30": 0,
+   "x31": 0,
+   "x4": 0,
+   "x5": 0,
+   "x6": 0,
+   "x7": 0,
+   "x8": 69988,
+   "x9": 0
+  }
+ ],
+ "vp": "tiny32-vp"
+}

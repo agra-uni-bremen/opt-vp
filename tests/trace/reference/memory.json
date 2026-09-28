@@ -1,0 +1,98 @@
+{
+ "case": "memory",
+ "counters": {
+  "cycles": 31,
+  "instructions": 19,
+  "retired": 19,
+  "trees": 8,
+  "unused_instructions": 133
+ },
+ "digest": "7c8110c53205e410faaec8fbbd2642f1f2c367af8784f878550e8f2f51b0ff7f",
+ "files": {
+  "mainADDI.json": {
+   "bytes": 8734,
+   "raw_sha256": "91e090745ff984e198bede196617ab1e51bfaeeba14f29b19c1550a8836ad930",
+   "semantic_sha256": "28d8331f4f2aad0f2f5db0eb3c7db8df635f67db67c7c7a2617463feca139b64"
+  },
+  "mainAUIPC.json": {
+   "bytes": 7838,
+   "raw_sha256": "4be26baa9b7b5c5dfc59ebcd08a867522ecc0ed1bcbebfa24bcd9d9006d6bc0c",
+   "semantic_sha256": "ab4cd4ab0b80699f03007f8a944729257e58ad8413349c91c6c28361c7b5b272"
+  },
+  "mainECALL.json": {
+   "bytes": 339,
+   "raw_sha256": "470c564ec94b3184ed1fc2c6cd1dc354c676444fb43f10a7a376487110da3357",
+   "semantic_sha256": "9fa0ebd0b64b00975d70f3711e8d5336e0111a952b1729c0680917a4c0b1cf5a"
+  },
+  "mainJAL.json": {
+   "bytes": 1350,
+   "raw_sha256": "0e5bdf5c521fed47247c9dbe49ac5653b403a01b086bd1b931d1336527c35175",
+   "semantic_sha256": "5c8b1675082dafa4071c6bf7d0d853a9b048c5f7970ae560620674245351cbd8"
+  },
+  "mainJALR.json": {
+   "bytes": 3645,
+   "raw_sha256": "6f90548d5ae51e4bf8db913f518fedb117d83298c78732b8ce438df5574ffd56",
+   "semantic_sha256": "392678c030c03f35124af2da8c71795502487e72ffa7d248653537a685fa9d7a"
+  },
+  "mainLUI.json": {
+   "bytes": 2113,
+   "raw_sha256": "aec73918e4c8a52e899a5f04ee5a6be65eb7440095f48d7f7e11b89544bfc158",
+   "semantic_sha256": "c0e614e3a31083b9be1996abf9e30ca44703fca14272f579aa9a91673d866c8a"
+  },
+  "mainLW.json": {
+   "bytes": 2167,
+   "raw_sha256": "d0287411edf9ed8ca709608ae58cf1b12c0039a23c930df4b9071beef071b927",
+   "semantic_sha256": "78dc09aeb6a5e7d4cd444bc3808e5ffd78c5653a7b2cdcd4190d35c1c9012abf"
+  },
+  "mainSW.json": {
+   "bytes": 4411,
+   "raw_sha256": "16436fa97a823689ac0a69ce315efe66c8c22548469c3c25f71e57ea2103aafc",
+   "semantic_sha256": "d4ae03f8617042c637161346b3f930d9420a34e2f62912cc35a075c0de279f9c"
+  }
+ },
+ "flags": [
+  "-e",
+  "--trace-depth",
+  "6"
+ ],
+ "program": "sw/trace-test-memory",
+ "registers": [
+  {
+   "hart": 0,
+   "pc": 65764,
+   "x0": 0,
+   "x1": 65700,
+   "x10": 0,
+   "x11": 200,
+   "x12": 0,
+   "x13": 0,
+   "x14": 0,
+   "x15": 0,
+   "x16": 0,
+   "x17": 93,
+   "x18": 0,
+   "x19": 0,
+   "x2": 134217724,
+   "x20": 0,
+   "x21": 0,
+   "x22": 0,
+   "x23": 0,
+   "x24": 0,
+   "x25": 0,
+   "x26": 0,
+   "x27": 0,
+   "x28": 172032,
+   "x29": 0,
+   "x3": 0,
+   "x30": 0,
+   "x31": 0,
+   "x4": 0,
+   "x5": 0,
+   "x6": 43,
+   "x7": 172032,
+   "x8": 69860,
+   "x9": 0
+  }
+ ],
+ "vp": "tiny32-vp"
+}

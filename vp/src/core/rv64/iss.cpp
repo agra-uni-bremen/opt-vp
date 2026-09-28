@@ -1,5 +1,4 @@
 #include "iss.h"
-#include "trace/report.h"
 
 // to save *cout* format setting, see *ISS::show*
 // #include <boost/format.hpp>
@@ -126,23 +125,12 @@ void RegFile::show() {
 	}
 }
 
-ISS::ISS(uint64_t hart_id, const char *output_filestr, const char *input_filestr,std::vector<uint64_t> input_hashes, bool use_E_base_isa) : systemc_name("Core-" + std::to_string(hart_id)) {
+ISS::ISS(uint64_t hart_id, bool use_E_base_isa) : systemc_name("Core-" + std::to_string(hart_id)) {
 	csrs.mhartid.reg = hart_id;
 	op = Opcode::Mapping::UNDEF;
 
 	sc_core::sc_time qt = tlm::tlm_global_quantum::instance().get();
 	cycle_time = sc_core::sc_time(10, sc_core::SC_NS);
-
-	output_filename_string = output_filestr ? output_filestr : "";
-	if (!output_filename_string.empty()) {
-		char last = output_filename_string.back();
-		if (last != '/') {
-			output_filename_string.push_back('/');
-		}
-	}
-	output_filename = output_filename_string.c_str();
-	path_hashes = input_hashes.data();
-	input_filename = input_filestr;
 
 	assert(qt >= cycle_time);
 	assert(qt % cycle_time == sc_core::SC_ZERO_TIME);
@@ -169,8 +157,6 @@ ISS::ISS(uint64_t hart_id, const char *output_filestr, const char *input_filestr
 	instr_cycles[Opcode::REM] = mul_div_cycles;
 	instr_cycles[Opcode::REMU] = mul_div_cycles;
 	op = Opcode::UNDEF;
-
-	ring_buffer_index = 0;
 
 	block_on_wfi(false);
 }
@@ -201,9 +187,8 @@ void ISS::exec_step() {
 	if (csrs.instret.reg % 1000000 == 0 && csrs.instret.reg > 0) {
 		// colored progress output (ANSI colors)
 		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%lu\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
-		for (int i = 0; i < 5; ++i) {
-			int idx = (ring_buffer_index + trace_depth - i) % trace_depth;
-			auto &step = last_executed_steps[idx];
+		for (unsigned i = 0; i < 5; ++i) {
+			const ExecutionInfo &step = tracer.recent_step(i);
 			printf("  PC: \x1b[33m0x%08lx\x1b[0m, Opcode: \x1b[35m%s\x1b[0m\n",
 				   step.last_executed_pc,
 				   Opcode::mappingStr[step.last_executed_instruction]);
@@ -212,31 +197,8 @@ void ISS::exec_step() {
 
 	uint64_t cycles_diff = _compute_and_get_current_cycles() - prev_cycles;
 
-	//insert into tree of oldest instruction, which will be overwritten in the next step
-	Opcode::Mapping oldest_op = last_executed_steps[ring_buffer_index].last_executed_instruction;
-	if(oldest_op){//ring buffer is still being filled if this is false
-		//check if a tree for this op already exists
-		InstructionNodeR* found_tree = NULL;
-		for (InstructionNodeR& root : instruction_trees){
-			
-			if(root.instruction == oldest_op){
-				found_tree = &root;
-				break;
-			}
-		}
-		if(found_tree!=NULL){
-			//printf("-> %d\n",found_tree->instruction);
-		}else{
-			//printf("first occurance of op %d. Adding to list\n", oldest_op);
-			instruction_trees.emplace_back(oldest_op, 0);
-			found_tree = &instruction_trees.back();
-		}
-		//printf("found tree found or created for op %d", found_tree->instruction);
-
-		//insert ringbuffer - this opcode into tree
-		found_tree->insert_rb(last_executed_steps, 
-							ring_buffer_index);
-	}
+	//the slot about to be overwritten ends the oldest window, so insert that window first
+	tracer.begin_step();
 
 	if (trace) {
 		printf("core %2u: prv %1x: pc %8x: %s ", csrs.mhartid.reg, prv, last_pc, Opcode::mappingStr[op]);
@@ -1496,59 +1458,43 @@ void ISS::exec_step() {
 	}
 	#endif
 
-//---------------------------------------------------------------------------------
-//                             save instruction info of last execution
-//---------------------------------------------------------------------------------
-		last_executed_steps[ring_buffer_index].last_executed_instruction = op;
-		last_executed_steps[ring_buffer_index].last_cycles = cycles_diff;
-		last_executed_steps[ring_buffer_index].last_registers = {RS1,RS2,RD};
-		last_executed_steps[ring_buffer_index].last_executed_pc = last_pc;
-		//the entry written in the previous step is still in the slot before this one
-		last_executed_steps[ring_buffer_index].last_predecessor_pc =
-			last_executed_steps[ring_buffer_index > 0 ? ring_buffer_index - 1 : trace_depth - 1].last_executed_pc;
-		last_executed_steps[ring_buffer_index].last_powermode = 0; //TODO
-		last_executed_steps[ring_buffer_index].last_memory_read = 0;
-		last_executed_steps[ring_buffer_index].last_memory_written = 0;
-		last_executed_steps[ring_buffer_index].last_step_id = total_num_instr;
-		last_executed_steps[ring_buffer_index].last_stack_pointer = regs[RegFile::sp];
-		last_executed_steps[ring_buffer_index].last_frame_pointer = regs[RegFile::fp];
-		last_executed_steps[ring_buffer_index].last_parameter = last_parameter;
-		last_executed_steps[ring_buffer_index].last_branch_outcome = last_branch_outcome;
-		last_executed_steps[ring_buffer_index].last_branch_offset = last_branch_offset;
-		last_executed_steps[ring_buffer_index].last_peripheral_name = last_memory_peripheral;
+	//record what this instruction did, for the windows that end at it
+	ExecutionInfo &step = tracer.step();
+	step.last_executed_instruction = op;
+	step.last_cycles = cycles_diff;
+	step.last_registers = {RS1, RS2, RD};
+	step.last_executed_pc = last_pc;
+	step.last_predecessor_pc = tracer.previous_step().last_executed_pc;
+	step.last_powermode = 0; //TODO
+	step.last_memory_read = 0;
+	step.last_memory_written = 0;
+	step.last_step_id = total_num_instr;
+	step.last_stack_pointer = regs[RegFile::sp];
+	step.last_frame_pointer = regs[RegFile::fp];
+	step.last_parameter = last_parameter;
+	step.last_branch_outcome = last_branch_outcome;
+	step.last_branch_offset = last_branch_offset;
+	step.last_peripheral_name = last_memory_peripheral;
 
-		last_executed_steps[ring_buffer_index].last_memory_access_type = std::get<1>(last_memory_access);
-		if(std::get<1>(last_memory_access)==AccessType::STORE){//check if memory was accessed in the last execution step
-			last_executed_steps[ring_buffer_index].last_memory_written = std::get<0>(last_memory_access); //fetch accessed addresses from persistent variable
-			if(last_executed_steps[ring_buffer_index].last_memory_written==0){
-				printf("ERROR ZERO write\n\n\n");
-			}
-			#ifdef debug_dependencies
-			printf("WRITE %lx (%s at idx:%d)\n",last_executed_steps[ring_buffer_index].last_memory_written, Opcode::mappingStr[op], ring_buffer_index);
-			#endif
-		}else{
-			if(std::get<1>(last_memory_access)==AccessType::LOAD)
-			{
-			   last_executed_steps[ring_buffer_index].last_memory_read = std::get<0>(last_memory_access);
-			   #ifdef debug_dependencies
-			   printf("LOAD %lx, (%s at idx:%d)\n", last_executed_steps[ring_buffer_index].last_memory_read, Opcode::mappingStr[op], ring_buffer_index);
-			   #endif
-			}
-			
+	step.last_memory_access_type = std::get<1>(last_memory_access);
+	if (std::get<1>(last_memory_access) == AccessType::STORE) {
+		step.last_memory_written = std::get<0>(last_memory_access);
+		if (step.last_memory_written == 0) {
+			printf("ERROR ZERO write\n\n\n");
 		}
-		last_memory_access = {0, AccessType::NONE};//reset last memory access
-		last_memory_peripheral = nullptr;
-
-//-------------------------------------------------------------------------
-//                          
-//-------------------------------------------------------------------------
-	//updating ringbuffer done
-	//update index
-	//wrap by comparison instead of a division: this runs for every executed instruction
-	if(++ring_buffer_index >= trace_depth){
-		ring_buffer_index = 0;
+		#ifdef debug_dependencies
+		printf("WRITE %lx (%s)\n", step.last_memory_written, Opcode::mappingStr[op]);
+		#endif
+	} else if (std::get<1>(last_memory_access) == AccessType::LOAD) {
+		step.last_memory_read = std::get<0>(last_memory_access);
+		#ifdef debug_dependencies
+		printf("LOAD %lx, (%s)\n", step.last_memory_read, Opcode::mappingStr[op]);
+		#endif
 	}
+	last_memory_access = {0, AccessType::NONE};
+	last_memory_peripheral = nullptr;
 
+	tracer.end_step();
 }
 
 uint64_t ISS::_compute_and_get_current_cycles() {
@@ -2332,9 +2278,8 @@ void ISS::run() {
 }
 
 void ISS::show() {
-	// Everything after the register dump lives in the trace library, once instead of once
-	// per architecture. See vp/src/trace/report.h.
-	flush_ring_buffer(instruction_trees, last_executed_steps, ring_buffer_index);
+	//the last windows are still in the ring buffer and have to reach their trees first
+	tracer.flush();
 
 	boost::io::ios_flags_saver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
@@ -2344,23 +2289,6 @@ void ISS::show() {
 	std::cout << "num-instr = " << std::dec << csrs.instret.reg << std::endl;
 	std::cout << "==========================\n==========================\n";
 
-	TraceReport report;
-	report.trees = &instruction_trees;
-	report.retired_instructions = csrs.instret.reg;
-	report.stepped_instructions = total_num_instr;
-	report.cycles = _compute_and_get_current_cycles();
-	report.memory_accesses = &memory_access_map;
-	report.output_directory = output_filename_string;
-	report.input_program = input_filename ? input_filename : "";
-	report.write_dot = output_as_dot;
-	report.write_csv = output_as_csv;
-	report.write_sequences = output_as_json;
-	report.write_trees = output_full_export;
-	report.write_coverage_csv = output_coverage_csv_enabled;
-	report.coverage_csv_file = coverage_csv_file;
-	report.coverage_top_n = coverage_top_n;
-	report.coverage_similarity_threshold = coverage_similarity_threshold;
-	report.interactive = interactive_mode;
-
-	run_trace_report(report);
+	tracer.report(csrs.instret.reg, total_num_instr, _compute_and_get_current_cycles(),
+	              &memory_access_map);
 }

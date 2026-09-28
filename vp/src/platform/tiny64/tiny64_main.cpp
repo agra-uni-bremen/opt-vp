@@ -53,13 +53,12 @@ public:
 int sc_main(int argc, char **argv) {
 	TinyOptions opt;
 	opt.parse(argc, argv);
-	set_trace_depth(opt.instruction_tree_depth); //keeps the compiled depth if the option was not given
 
 	std::srand(std::time(nullptr));  // use current time as seed for random generator
 
 	tlm::tlm_global_quantum::instance().set(sc_core::sc_time(opt.tlm_global_quantum, sc_core::SC_NS));
 
-	ISS core(0, opt.output_file.c_str(), opt.input_program.c_str(), opt.input_hash_list, opt.use_E_base_isa);
+	ISS core(0, opt.use_E_base_isa);
 	MMU mmu(core);
 	CombinedMemoryInterface core_mem_if("MemoryInterface0", core, &mmu);
 	SimpleMemory mem("SimpleMemory", opt.mem_size);
@@ -96,16 +95,8 @@ int sc_main(int argc, char **argv) {
 		core.sys = &sys;
 	core.error_on_zero_traphandler = opt.error_on_zero_traphandler;
 
-	core.output_as_dot = opt.output_as_dot;
-	core.output_as_csv = opt.output_as_csv;
-	core.output_as_json = opt.output_as_json;
-	core.output_full_export = opt.output_full_export;
-	core.interactive_mode = opt.interactive_mode;
+	core.tracer.configure(opt.trace_config());
 	core.suppress_prompts = opt.suppress_prompts;
-	core.coverage_csv_file = opt.coverage_csv_file;
-	core.coverage_top_n = opt.top_n;
-	core.coverage_similarity_threshold = opt.similarity_threshold;
-	core.output_coverage_csv_enabled = !opt.coverage_csv_file.empty();
 
 	// setup port mapping
 	bus.ports[0] = new PortMapping(opt.mem_start_addr, opt.mem_end_addr);

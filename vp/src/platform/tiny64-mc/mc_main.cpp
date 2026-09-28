@@ -92,6 +92,9 @@ int sc_main(int argc, char **argv) {
 	}
 	core0.error_on_zero_traphandler = opt.error_on_zero_traphandler;
 	core1.error_on_zero_traphandler = opt.error_on_zero_traphandler;
+	//each core gets its own hart id so their exported files do not collide
+	core0.tracer.configure(opt.trace_config(0));
+	core1.tracer.configure(opt.trace_config(1));
 	core0.suppress_prompts = opt.suppress_prompts;
 	core1.suppress_prompts = opt.suppress_prompts;
 

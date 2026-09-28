@@ -1,0 +1,78 @@
+{
+ "case": "prefix",
+ "counters": {
+  "cycles": 77,
+  "instructions": 77,
+  "retired": 77,
+  "trees": 4,
+  "unused_instructions": 131
+ },
+ "digest": "e3e924073bfc8b493babd110dec6f244167347d5a779cb740ca60dff70522e55",
+ "files": {
+  "mainADD.json": {
+   "bytes": 6813,
+   "raw_sha256": "9b1fefcf9a9094a13b481471ed8dcee923f1913c3a0001830ed497ce9c05694b",
+   "semantic_sha256": "b6925a94c3ad83f87057d311d758138d7fad8cb91586b1b7219a32707c47b79a"
+  },
+  "mainADDI.json": {
+   "bytes": 36752,
+   "raw_sha256": "e286b6ac2bad4bfdcca4599ce8473237779eb02f7bf308e443eed525041e90ea",
+   "semantic_sha256": "d69030c0d63fb7fceea4192522601bc611ff70b4f0cc506fceabb83c29dabeca"
+  },
+  "mainECALL.json": {
+   "bytes": 339,
+   "raw_sha256": "7d6af55b25a302914ead96407e645d281be79c84e697540e8fca560399646357",
+   "semantic_sha256": "8badb4efa586f0bb8ae8a38cf8093e43f3a273c405cbaf0af0e0cc01ce28306e"
+  },
+  "mainSUB.json": {
+   "bytes": 8073,
+   "raw_sha256": "95a9f2d1817fd85d62ad88ea8d1c9d1ba3d1a2cd087b97b6ed8ca7e5a1fb3681",
+   "semantic_sha256": "e86985d66bcffd5556d9e47fafc5ebecf8d11c7d07080079267fd85fe33cb2b0"
+  }
+ },
+ "flags": [
+  "-e",
+  "--trace-depth",
+  "6"
+ ],
+ "program": "sw/trace-test-prefix",
+ "registers": [
+  {
+   "hart": 0,
+   "pc": 65960,
+   "x0": 0,
+   "x1": 0,
+   "x10": 0,
+   "x11": 0,
+   "x12": 0,
+   "x13": 0,
+   "x14": 0,
+   "x15": 0,
+   "x16": 0,
+   "x17": 93,
+   "x18": 0,
+   "x19": 0,
+   "x2": 134217724,
+   "x20": 0,
+   "x21": 0,
+   "x22": 0,
+   "x23": 0,
+   "x24": 0,
+   "x25": 0,
+   "x26": 0,
+   "x27": 0,
+   "x28": 0,
+   "x29": 0,
+   "x3": 0,
+   "x30": 0,
+   "x31": 0,
+   "x4": 0,
+   "x5": 0,
+   "x6": 0,
+   "x7": 0,
+   "x8": 0,
+   "x9": 0
+  }
+ ],
+ "vp": "tiny32-vp"
+}

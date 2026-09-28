@@ -4,9 +4,8 @@
 #include <fstream>
 #include <iostream>
 
-// Moved from ISS::output_dot. The node classes write through std::cout
-// (InstructionNodeR::tree_to_dot), so writing to a file still means redirecting std::cout at
-// it; see the note in export.h.
+// `InstructionNodeR::tree_to_dot` writes through `std::cout`, so writing a graph to a file
+// means pointing `std::cout` at that file for the duration. See the note in export.h.
 
 namespace {
 
@@ -33,11 +32,11 @@ void write_graph_header() {
 }  // namespace
 
 void export_dot(const TraceReport &report) {
-	if (report.output_directory.empty()) {
+	if (report.config.output_directory.empty()) {
 		// No directory to write to, so the whole thing goes to standard output as one graph.
 		write_graph_header();
-		for (InstructionNodeR &tree : *report.trees) {
-			tree.tree_to_dot(report.retired_instructions);
+		for (InstructionNodeR &tree : report.trees) {
+			tree.tree_to_dot(report.retired_instructions, report.config.graph_branch_threshold);
 		}
 		std::cout << "}" << std::endl;
 		write_memory_map(report.memory_accesses);
@@ -45,23 +44,25 @@ void export_dot(const TraceReport &report) {
 	}
 
 	std::streambuf *cout_save = std::cout.rdbuf();
-	std::cout << "writing dot files to directory " << report.output_directory << std::endl;
+	std::cout << "writing dot files to directory " << report.config.output_directory << std::endl;
 
 	// one dot file per opcode, named after the tree's root instruction
-	for (InstructionNodeR &tree : *report.trees) {
-		std::ofstream output(report.output_directory +
-		                     std::string(Opcode::mappingStr[tree.instruction]) + std::string(".dot"));
+	for (InstructionNodeR &tree : report.trees) {
+		std::ofstream output(report.config.output_directory +
+		                     std::string(Opcode::mappingStr[tree.instruction]) + hart_suffix(report.config) +
+		                     std::string(".dot"));
 		output << "// " << std::time(0) << std::endl;
 		std::cout.rdbuf(output.rdbuf());
 
 		write_graph_header();
 		// don't use colorscheme greys9 for now
 		std::cout << "edge [style=\"solid\", arrowsize = .5];" << std::endl;
-		tree.tree_to_dot(report.retired_instructions);
+		tree.tree_to_dot(report.retired_instructions, report.config.graph_branch_threshold);
 		std::cout << "}" << std::endl;
 	}
 
-	std::ofstream memory_map(report.output_directory + std::string("memory_map.md"));
+	std::ofstream memory_map(report.config.output_directory + std::string("memory_map") + hart_suffix(report.config) +
+	                          std::string(".md"));
 	memory_map << "// " << std::time(0) << std::endl;
 	std::cout.rdbuf(memory_map.rdbuf());
 	write_memory_map(report.memory_accesses);

@@ -13,7 +13,7 @@
 #include "syscall_if.h"
 #include "util/common.h"
 
-#include "trace/trace.h"
+#include "trace/tracer.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -172,12 +172,6 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	int64_t lr_sc_counter = 0;
 	uint64_t total_num_instr = 0;
 
-	bool output_as_dot = false;
-	bool output_as_csv = false;
-	bool output_as_json = false;
-	bool output_full_export = false;
-	bool output_coverage_csv_enabled = false;
-	bool interactive_mode = false;
 	bool suppress_prompts = false;
 	bool allow_misaligned_access = false;
 	bool always_trap_misaligned_access = false;
@@ -186,10 +180,9 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	Instruction instr;
 	Opcode::Mapping op;
 
-	//one entry for each different instruction, representing the root node
-	std::list<InstructionNodeR> instruction_trees; //TODO maybe allow derived classes if their info becomes necessary
-	//last_executed instructions as a ring buffer
-	std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> last_executed_steps; 
+	//records the executed instructions as execution sequence trees. Configure it once before
+	//the run with tracer.configure(); see vp/src/trace/tracer.h
+	Tracer tracer;
 
 	uint64_t prev_cycles = 0;
 
@@ -217,18 +210,10 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 		return nullptr;
 	}
 
-	uint8_t ring_buffer_index =  0;
 	CoreExecStatus status = CoreExecStatus::Runnable;
 	std::unordered_set<uint64_t> breakpoints;
 	bool debug_mode = false;
 
-	std::string output_filename_string;
-	const char* output_filename;
-	std::string coverage_csv_file;
-	unsigned int coverage_top_n = 10;
-	float coverage_similarity_threshold = 0.2f;
-	uint64_t *path_hashes;
-	const char* input_filename;
 
 	sc_core::sc_event wfi_event;
 
@@ -242,7 +227,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	static constexpr int64_t REG32_MIN = INT32_MIN;
 	static constexpr unsigned xlen = 64;
 
-	ISS(uint64_t hart_id, const char *output_filename = "", const char *input_filename = "", std::vector<uint64_t> input_hashes = {}, bool use_E_base_isa = false);
+	ISS(uint64_t hart_id, bool use_E_base_isa = false);
 
 	
 	void exec_step();

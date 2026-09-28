@@ -21,15 +21,15 @@ Options::Options(void) {
 		("use-data-dmi", po::bool_switch(&use_data_dmi), "use dmi to execute load/store operations")
 		("use-dmi", po::bool_switch(), "use instr and data dmi")
 		("dot", po::bool_switch(&output_as_dot), "output trees as dot graphs")
-		("export-sequences,seq", po::bool_switch(&output_as_json), "export sequences as json file")
-		("export-tree,csv", po::bool_switch(&output_as_csv), "export trees as csv")
-		("export-full,e", po::bool_switch(&output_full_export), "export all tree data as json files")
+		("export-sequences,seq", po::bool_switch(&output_as_json), "export the best sequences, their sub sequences and their variants as one json file (also --seq)")
+		("export-tree,csv", po::bool_switch(&output_as_csv), "export one csv row per node of every tree (also --csv)")
+		("export-full,e", po::bool_switch(&output_full_export), "export the JITR trace, one json file per tree. This is the export RETrace reads")
+		("scoring-library", po::value<std::string>(&scoring_library), "shared library the interactive mode loads scoring functions from")
 		("coverage-csv", po::value<std::string>(&coverage_csv_file)->implicit_value("sequences.csv"), "export top sequences as csv")
 		("top-n", po::value<unsigned int>(&top_n)->default_value(10), "top N sequences to export")
 		("trace-depth", po::value<unsigned int>(&instruction_tree_depth), "length of the traced instruction sequences (default and maximum: the compiled INSTRUCTION_TREE_DEPTH)")
 		("similarity", po::value<float>(&similarity_threshold)->default_value(0.2f), "similarity threshold for filtering top sequences")
-		("reduce-graph,r", po::value<float>(&reduce_graph_output), "reduce graph output by omitting branches below this threshold (1.0 - 0.0)")
-		("path-hashes", po::value<std::vector<uint64_t>>(&input_hash_list)->multitoken(), "list of path hashes to trace parent paths for")
+		("reduce-graph,r", po::value<float>(&graph_branch_threshold)->default_value(0.05f), "dot export: omit branches carrying less than this share of their tree's weight (0 draws every branch)")
 		("interactive,i", po::bool_switch(&interactive_mode), "Instead of exiting after the simulation has finished, keep the internal state and wait for commands")
 		("suppress-prompts", po::bool_switch(&suppress_prompts), "suppress interactive prompts")
 		("output-file,o", po::value<std::string>(&output_file), "output dot file")
@@ -97,6 +97,26 @@ void Options::parse(int argc, char **argv) {
 	}
 }
 
+TraceConfig Options::trace_config(unsigned int hart_id) const {
+	TraceConfig config;
+	config.depth = instruction_tree_depth;
+	config.write_trees = output_full_export;
+	config.write_dot = output_as_dot;
+	config.graph_branch_threshold = graph_branch_threshold;
+	config.write_csv = output_as_csv;
+	config.write_sequences = output_as_json;
+	config.write_coverage_csv = !coverage_csv_file.empty();
+	config.coverage_csv_file = coverage_csv_file;
+	config.coverage_top_n = top_n;
+	config.coverage_similarity_threshold = similarity_threshold;
+	config.interactive = interactive_mode;
+	config.scoring_library = scoring_library;
+	config.input_program = input_program;
+	config.hart_id = hart_id;
+	config.set_output_directory(output_file);
+	return config;
+}
+
 void Options::printValues(std::ostream& os) const {
 	os << std::dec;
 	os << "intercept_syscalls: " << intercept_syscalls << std::endl;
@@ -109,4 +129,13 @@ void Options::printValues(std::ostream& os) const {
 	os << "use_instr_dmi: " << use_instr_dmi << std::endl;
 	os << "use_data_dmi: " << use_data_dmi << std::endl;
 	os << "suppress-prompts: " << suppress_prompts << std::endl;
+	os << "output_file: " << output_file << std::endl;
+	os << "export_trees: " << output_full_export << std::endl;
+	os << "export_dot: " << output_as_dot << std::endl;
+	os << "export_csv: " << output_as_csv << std::endl;
+	os << "export_sequences: " << output_as_json << std::endl;
+	os << "coverage_csv_file: " << coverage_csv_file << std::endl;
+	os << "top_n: " << top_n << std::endl;
+	os << "similarity: " << similarity_threshold << std::endl;
+	os << "interactive: " << interactive_mode << std::endl;
 }

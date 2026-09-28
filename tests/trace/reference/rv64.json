@@ -1,0 +1,68 @@
+{
+ "case": "rv64",
+ "counters": {
+  "cycles": 5,
+  "instructions": 5,
+  "retired": 5,
+  "trees": 2,
+  "unused_instructions": 133
+ },
+ "digest": "120642a1cf98a6d0d0f7ac2eb9403430fb193406599f95d03394f04b20d0c0b5",
+ "files": {
+  "mainADDI.json": {
+   "bytes": 3208,
+   "raw_sha256": "67fff765abb3c6f80b7a66a379f5b2a07bfc2c64269e6f16a14785389825627c",
+   "semantic_sha256": "7423583268cfa4b6e6968464999e9d0c6839b27e7d53647416c9cd01c8322992"
+  },
+  "mainECALL.json": {
+   "bytes": 339,
+   "raw_sha256": "0912103691eb33e898cdab62f1fa4586c2a85bbbb709937b0bc0c2629be89c56",
+   "semantic_sha256": "cb81c8fe81e594541b0d5b15db8adf25ef0c0ef6e8b6699fdcda679899e03747"
+  }
+ },
+ "flags": [
+  "-e",
+  "--trace-depth",
+  "6"
+ ],
+ "program": "sw/trace-test-minimal-rv64",
+ "registers": [
+  {
+   "hart": 0,
+   "pc": 65732,
+   "x0": 0,
+   "x1": 0,
+   "x10": 0,
+   "x11": 0,
+   "x12": 0,
+   "x13": 0,
+   "x14": 0,
+   "x15": 0,
+   "x16": 0,
+   "x17": 93,
+   "x18": 0,
+   "x19": 0,
+   "x2": 134217720,
+   "x20": 0,
+   "x21": 0,
+   "x22": 0,
+   "x23": 0,
+   "x24": 0,
+   "x25": 0,
+   "x26": 0,
+   "x27": 0,
+   "x28": 0,
+   "x29": 0,
+   "x3": 0,
+   "x30": 0,
+   "x31": 0,
+   "x4": 0,
+   "x5": 0,
+   "x6": 0,
+   "x7": 0,
+   "x8": 0,
+   "x9": 0
+  }
+ ],
+ "vp": "tiny64-vp"
+}

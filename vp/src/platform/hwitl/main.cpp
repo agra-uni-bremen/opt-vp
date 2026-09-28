@@ -166,6 +166,7 @@ int sc_main(int argc, char **argv) {
 
 	if (opt.intercept_syscalls)
 		core.sys = &sys;
+	core.tracer.configure(opt.trace_config());
 	core.suppress_prompts = opt.suppress_prompts;
 
 	// address mapping

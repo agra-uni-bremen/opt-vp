@@ -2,6 +2,7 @@
 
 #include "core/common/instr.h"
 #include <set>
+#include <tuple>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -116,6 +117,10 @@ enum class AccessType {
 	LOAD=1,
 	STORE=2
 };
+
+//! Every address a load or a store touched, mapped to the pc that last wrote it and the pc
+//! that last read it. The dot export writes it out as a memory map.
+using MemoryAccessMap = std::map<uint64_t, std::tuple<uint64_t, uint64_t>>;
 
 enum class BranchOutcome : uint8_t {
 	NONE=0, //not a branch/jump
@@ -642,7 +647,12 @@ class InstructionNode{
 
 		virtual void _print(uint8_t level) = 0;
 
-		void tree_to_dot(uint64_t total_instructions){
+		/**
+		 * Write this tree as dot. `branch_threshold` omits any branch carrying less than that
+		 * share of the tree's weight, which keeps a graph of a real program readable; pass 0
+		 * to draw every branch.
+		 */
+		void tree_to_dot(uint64_t total_instructions, float branch_threshold){
 			std::stringstream dot_stream; 
 			std::stringstream connections_stream; 
 
@@ -661,7 +671,7 @@ class InstructionNode{
 			to_dot(instruction_string, "", 0, 0, 0, 
 				dot_stream,connections_stream,
 				weight,total_instructions, 
-				true, 0.05);
+				branch_threshold > 0.0f, branch_threshold);
 
 
 			dot_stream << connections_stream.str();

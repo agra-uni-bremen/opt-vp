@@ -8,10 +8,6 @@
 #include <iostream>
 #include <string>
 
-// Moved from the tail of ISS::show(), where it sat inside the `--interactive` branch in
-// both architectures. The 64 bit copy was missing the guards below, so `r` and `q` called
-// dlclose on a null or already closed handle there.
-
 namespace {
 
 /**
@@ -62,17 +58,17 @@ void run_interactive(TraceReport &report) {
 
 		if (mode == 'r') {
 			unload(sf_lib, score_functions);
-			sf_lib = load_scoring_functions(report.scoring_library);
+			sf_lib = load_scoring_functions(report.config.scoring_library);
 			score_functions = sf_lib.functions;
 		} else if (mode == 'a') {
-			analyze_trees(score_functions, *report.trees);
+			analyze_trees(score_functions, report.trees);
 		} else if (mode == 'b') {
 			using std::chrono::duration;
 			using std::chrono::high_resolution_clock;
 
 			auto before = high_resolution_clock::now();
 			for (size_t i = 0; i < 100; i++) {
-				analyze_trees(score_functions, *report.trees);
+				analyze_trees(score_functions, report.trees);
 			}
 			duration<double, std::milli> elapsed = high_resolution_clock::now() - before;
 			std::cout << "Analysis of 300  SF took " << elapsed.count() << "ms\n"
@@ -90,7 +86,7 @@ void run_interactive(TraceReport &report) {
 					          << PRUNE_THRESHOLD_WEIGHT << ")" << std::endl;
 				}
 			}
-			for (auto &&tree : *report.trees) {
+			for (auto &&tree : report.trees) {
 				printf("\tPruning with absolute threshold: %f\n", tree.weight * prune_threshold);
 				tree.prune_tree(tree.weight * prune_threshold, 0);
 			}

@@ -1,6 +1,7 @@
 #ifndef RISCV_VP_OPTIONS_H
 #define RISCV_VP_OPTIONS_H
 
+#include "trace/config.h"
 #include "util/options.h"
 
 #include <boost/program_options.hpp>
@@ -14,19 +15,23 @@ public:
 
 	std::string input_program;
 	std::string output_file;
+
+	// tracing. Read these through trace_config() rather than one by one: every platform
+	// applies the whole set with core.tracer.configure(opt.trace_config()).
 	std::string coverage_csv_file;
 	unsigned int top_n = 10;
 	float similarity_threshold = 0.2f;
-
-	std::vector<uint64_t> input_hash_list;
 	//effective instruction tree depth, 0 = use the depth the VP was compiled with
 	unsigned int instruction_tree_depth = 0;
-	float reduce_graph_output = 0.0;
+	//dot only: omit branches below this share of their tree's weight, 0 draws every branch
+	float graph_branch_threshold = 0.05f;
+	std::string scoring_library = "./vp/build/lib/libfunctions.so";
 	bool output_as_dot = false;
 	bool output_as_json = false;
 	bool output_as_csv = false;
 	bool output_full_export = false;
 	bool interactive_mode = false;
+
 	bool suppress_prompts = false;
 
 	bool intercept_syscalls = false;
@@ -37,6 +42,14 @@ public:
 	unsigned int tlm_global_quantum = 10;
 	bool use_instr_dmi = false;
 	bool use_data_dmi = false;
+
+	/**
+	 * The tracing settings as the trace library wants them.
+	 *
+	 * `hart_id` is zero unless the platform has more than one core, in which case pass each
+	 * core's id so their exported files do not collide.
+	 */
+	TraceConfig trace_config(unsigned int hart_id = 0) const;
 
 	virtual void printValues(std::ostream& os = std::cout) const;
 

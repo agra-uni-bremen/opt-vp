@@ -151,6 +151,8 @@ int sc_main(int argc, char **argv) {
 		sys.register_core(&cores[i]->iss);
 		if (opt.intercept_syscalls)
 			cores[i]->iss.sys = &sys;
+		//each core gets its own hart id so their exported files do not collide
+		cores[i]->iss.tracer.configure(opt.trace_config(i));
 		cores[i]->iss.suppress_prompts = opt.suppress_prompts;
 	}
 
