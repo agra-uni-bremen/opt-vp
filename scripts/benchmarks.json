@@ -1,0 +1,52 @@
+{
+  "comment": [
+    "Benchmark sets for scripts/snapshot.py. A set names a directory and the workloads in it.",
+    "A workload is found at <directory>/<name>/<name>, at <directory>/<name>/main, or at",
+    "<directory>/<name>. Workloads that are not there are skipped and named, so a set may",
+    "list more than one machine happens to have.",
+    "The embench sets live outside this repository and are assumed to be available one level higher by default. Build them first, or point --benchmarks",
+    "somewhere else. The sw set needs only this repository and a RISC-V cross compiler."
+  ],
+  "sets": {
+    "default": {
+      "comment": "Six embench workloads that cover the instruction mix the VP is used on. md5sum first.",
+      "directory": "../embench-iot/bd/src",
+      "workloads": [
+        "md5sum",
+        "crc32",
+        "aha-mont64",
+        "nsichneu",
+        "sglib-combined",
+        "slre"
+      ]
+    },
+    "md5sum": {
+      "comment": "The single reference workload. Use it for a quick check while working.",
+      "directory": "../embench-iot/bd/src",
+      "workloads": ["md5sum"]
+    },
+    "embench": {
+      "comment": "Everything embench builds. Slow; for a release measurement rather than a working one.",
+      "directory": "../embench-iot/bd/src",
+      "workloads": [
+        "aha-mont64", "crc32", "edn", "huffbench", "matmult-int", "md5sum",
+        "minver", "nettle-aes", "nettle-sha256", "nsichneu", "picojpeg",
+        "primecount", "qrduino", "sglib-combined", "slre", "statemate",
+        "tarfind", "ud", "wikisort"
+      ]
+    },
+    "sw": {
+      "comment": "The programs in this repository. Tiny, so the timings are noise, but they need nothing but a cross compiler and they exercise the trace features by name.",
+      "directory": "sw",
+      "workloads": [
+        "basic-c",
+        "crc8",
+        "trace-test-default",
+        "trace-test-memory",
+        "trace-test-minimal",
+        "trace-test-output-dep",
+        "trace-test-prefix"
+      ]
+    }
+  }
+}
