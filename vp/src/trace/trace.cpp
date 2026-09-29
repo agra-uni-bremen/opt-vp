@@ -542,7 +542,7 @@ void InstructionNode::update_weight(const StepInfo& p){
 	}
 	#ifdef trace_predecessor_pcs
 	//which pc this occurrence was actually reached from, so later, a pc path can be proven instead of guessed
-	it->second.predecessors[p.predecessor_pc]++;
+	it->second.count_predecessor(p.predecessor_pc);
 	#endif
 	#ifdef trace_parameter
 	//record the value the ISS decoded for this instruction: shift amount, branch/jump target or,
@@ -816,10 +816,10 @@ nlohmann::ordered_json InstructionNode::to_json(){
 			const RegisterSetCounter& rsc = entry.second;
 			nlohmann::json jsonEntry = { {"count", rsc.count}, {"rs1", rsc.regset.rs1}, {"rs2", rsc.regset.rs2}, {"rd", rsc.regset.rd} };
 			#ifdef trace_predecessor_pcs
-			if (!rsc.predecessors.empty()) {
+			if (rsc.has_predecessors()) {
 				nlohmann::json jsonPredecessors = nlohmann::json::object();
-				for (const auto& predecessor : rsc.predecessors) {
-					jsonPredecessors[std::to_string(predecessor.first)] = predecessor.second;
+				for (const PcCounter& predecessor : rsc.predecessors_in_pc_order()) {
+					jsonPredecessors[std::to_string(predecessor.pc)] = predecessor.count;
 				}
 				jsonEntry["predecessors"] = jsonPredecessors;
 			}
@@ -868,7 +868,8 @@ nlohmann::ordered_json InstructionNode::to_json(){
 	jsonNode["inputs"] = inputs;
 	jsonNode["outputs"] = outputs;
 
-	jsonNode["occurrence"] = occurrence;
+	//kept in the trace so the format does not move; see InstructionNode for why it is zeros
+	jsonNode["occurrence"] = nlohmann::json::array({0, 0, 0, 0});
 
 	#ifdef trace_parameter
 	//[[pc, [[value, count], ...]], ...]
@@ -952,10 +953,10 @@ std::stringstream InstructionNode::csv_format(uint64_t parent_hash, const char* 
 			<< num_current_total_outputs << ";"
 			<< -1 << ";" //TODO Instruction Types
 			<< num_branches << ";" //Number of Branches
-			<< occurrence[0] << ";"
-			<< occurrence[1] << ";"
-			<< occurrence[2] << ";"
-			<< occurrence[3] << ";"
+			<< 0 << ";" //the four phase counters, always zero
+			<< 0 << ";"
+			<< 0 << ";"
+			<< 0 << ";"
 			<< number_of_pcs << ";"
 			<< max_pcs - number_of_pcs << ";";
 

@@ -170,6 +170,11 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	csr_table csrs;
 	PrivilegeLevel prv = MachineMode;
 	int64_t lr_sc_counter = 0;
+
+	//! Progress output every this many retired instructions. Compared against rather than
+	//! divided by, because the comparison runs once per instruction.
+	static constexpr uint64_t progress_report_interval = 1000000;
+	uint64_t next_progress_report = progress_report_interval;
 	uint64_t total_num_instr = 0;
 
 	bool suppress_prompts = false;
@@ -220,7 +225,11 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	std::string systemc_name;
 	tlm_utils::tlm_quantumkeeper quantum_keeper;
 	sc_core::sc_time cycle_time;
-	sc_core::sc_time cycle_counter;  // use a separate cycle counter, since cycle count can be inhibited
+	//! Cycles executed, as a time. A separate counter, because the cycle count can be inhibited
+	//! (mcountinhibit.CY) while simulated time keeps running.
+	//! Counting it as a plain number instead, to save the division below, needs a second table of
+	//! per opcode cycle counts and measured 3 percent slower over the embench set.
+	sc_core::sc_time cycle_counter;
 	std::array<sc_core::sc_time, Opcode::NUMBER_OF_INSTRUCTIONS> instr_cycles;
 
 	static constexpr int64_t REG_MIN = INT64_MIN;
@@ -232,7 +241,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	
 	void exec_step();
 	
-	uint64_t _compute_and_get_current_cycles();
+	uint64_t get_current_cycles();
 	
 	void init(instr_memory_if *instr_mem, data_memory_if *data_mem, clint_if *clint, uint64_t entrypoint, uint64_t sp);
 

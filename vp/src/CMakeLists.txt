@@ -1,8 +1,8 @@
 include_directories(.)
 
-subdirs(vendor)
-subdirs(core)
-subdirs(trace)
-subdirs(platform)
-subdirs(lib)
+add_subdirectory(vendor)
+add_subdirectory(core)
+add_subdirectory(trace)
+add_subdirectory(platform)
+add_subdirectory(lib)
 add_subdirectory(scoring_functions)

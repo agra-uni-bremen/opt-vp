@@ -1,1 +1,1 @@
-subdirs(json)
+add_subdirectory(json)

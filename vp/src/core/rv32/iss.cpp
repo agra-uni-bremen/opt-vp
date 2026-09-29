@@ -175,7 +175,8 @@ void ISS::exec_step() {
 		pc += 4;
 	}
 
-	if (csrs.instret.reg % 1000000 == 0 && csrs.instret.reg > 0) {
+	if (csrs.instret.reg >= next_progress_report) {
+		next_progress_report += progress_report_interval;
 		// colored progress output (ANSI colors)
 		printf("\x1b[1;36m[Progress]\x1b[0m Executed \x1b[32m%lu\x1b[0m instructions. Last 5 steps:\n", csrs.instret.reg);
 		for (unsigned i = 0; i < 5; ++i) {
@@ -186,7 +187,7 @@ void ISS::exec_step() {
 		}
 	}
 
-	uint64_t cycles_diff = _compute_and_get_current_cycles() - prev_cycles;
+	uint64_t cycles_diff = get_current_cycles() - prev_cycles;
 
 	//the slot about to be overwritten ends the oldest window, so insert that window first
 	tracer.begin_step();
@@ -1381,15 +1382,12 @@ void ISS::exec_step() {
 	tracer.end_step();
 }
 
-uint64_t ISS::_compute_and_get_current_cycles() {
+uint64_t ISS::get_current_cycles() {
 	assert(cycle_counter % cycle_time == sc_core::SC_ZERO_TIME);
 	assert(cycle_counter.value() % cycle_time.value() == 0);
 
-	uint64_t num_cycles = cycle_counter.value() / cycle_time.value();
-
-	return num_cycles;
+	return cycle_counter.value() / cycle_time.value();
 }
-
 
 bool ISS::is_invalid_csr_access(uint32_t csr_addr, bool is_write) {
     if (csr_addr == csr::FFLAGS_ADDR || csr_addr == csr::FRM_ADDR || csr_addr == csr::FCSR_ADDR) {
@@ -1439,11 +1437,11 @@ uint32_t ISS::get_csr_value(uint32_t addr) {
 		}
 
 		case MCYCLE_ADDR:
-			csrs.cycle.reg = _compute_and_get_current_cycles();
+			csrs.cycle.reg = get_current_cycles();
 			return csrs.cycle.words.low;
 
 		case MCYCLEH_ADDR:
-			csrs.cycle.reg = _compute_and_get_current_cycles();
+			csrs.cycle.reg = get_current_cycles();
 			return csrs.cycle.words.high;
 
 		case MINSTRET_ADDR:
@@ -2209,6 +2207,6 @@ void ISS::show() {
 	std::cout << "num-instr = " << std::dec << csrs.instret.reg << std::endl;
 	std::cout << "==========================\n==========================\n";
 
-	tracer.report(csrs.instret.reg, total_num_instr, _compute_and_get_current_cycles(),
+	tracer.report(csrs.instret.reg, total_num_instr, get_current_cycles(),
 	              &memory_access_map);
 }

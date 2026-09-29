@@ -16,10 +16,18 @@ Options::Options(void) {
 		("debug-mode", po::bool_switch(&use_debug_runner), "start execution in debugger (using gdb rsp interface)")
 		("debug-port", po::value<unsigned int>(&debug_port), "select port number to connect with GDB")
 		("trace-mode", po::bool_switch(&trace_mode), "enable instruction tracing")
-		("tlm-global-quantum", po::value<unsigned int>(&tlm_global_quantum), "set global tlm quantum (in NS)")
-		("use-instr-dmi", po::bool_switch(&use_instr_dmi), "use dmi to fetch instructions")
-		("use-data-dmi", po::bool_switch(&use_data_dmi), "use dmi to execute load/store operations")
-		("use-dmi", po::bool_switch(), "use instr and data dmi")
+		("tlm-global-quantum", po::value<unsigned int>(&tlm_global_quantum),
+			"how far the core may run ahead of the rest of the simulation before synchronising, in ns "
+			"(default 10, which is one cycle, so it synchronises on every instruction). Raising it is "
+			"the largest speed knob the VP has: md5sum runs 45 percent faster at 1000. It delays when "
+			"the core observes an interrupt or a peripheral by up to that time, so raise it only for a "
+			"workload that does not depend on that")
+		("no-instr-dmi", po::bool_switch(), "fetch instructions through the bus instead of by direct memory access")
+		("no-data-dmi", po::bool_switch(), "run load/store through the bus instead of by direct memory access")
+		("no-dmi", po::bool_switch(), "run both instruction fetch and load/store through the bus (about a third slower)")
+		("use-instr-dmi", po::bool_switch(), "accepted and ignored: instruction dmi is the default")
+		("use-data-dmi", po::bool_switch(), "accepted and ignored: data dmi is the default")
+		("use-dmi", po::bool_switch(), "accepted and ignored: dmi is the default")
 		("dot", po::bool_switch(&output_as_dot), "output trees as dot graphs")
 		("export-sequences,seq", po::bool_switch(&output_as_json), "export the best sequences, their sub sequences and their variants as one json file (also --seq)")
 		("export-tree,csv", po::bool_switch(&output_as_csv), "export one csv row per node of every tree (also --csv)")
@@ -78,9 +86,16 @@ void Options::parse(int argc, char **argv) {
 		}
 
 		po::notify(vm);
-		if (vm["use-dmi"].as<bool>()) {
-			use_data_dmi = true;
-			use_instr_dmi = true;
+		//direct memory access is the default, so only the switches that turn it off do anything
+		if (vm["no-dmi"].as<bool>()) {
+			use_data_dmi = false;
+			use_instr_dmi = false;
+		}
+		if (vm["no-instr-dmi"].as<bool>()) {
+			use_instr_dmi = false;
+		}
+		if (vm["no-data-dmi"].as<bool>()) {
+			use_data_dmi = false;
 		}
 		if (vm["intercept-syscalls"].as<bool>() && vm.count("error-on-zero-traphandler") == 0) {
 			// intercept syscalls active, but no overriding error-on-zero-traphandler switch

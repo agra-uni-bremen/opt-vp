@@ -40,8 +40,12 @@ public:
 	unsigned int debug_port = 5005;
 	bool trace_mode = false;
 	unsigned int tlm_global_quantum = 10;
-	bool use_instr_dmi = false;
-	bool use_data_dmi = false;
+	//Direct memory access for instruction fetch and for load/store, bypassing the TLM bus for the
+	//plain memory ranges. On by default: it makes a run about a third faster and every reference
+	//case produces the same trace, the same counters and the same cycle count either way. Turn it
+	//off with --no-dmi when something has to observe the core's memory traffic on the bus.
+	bool use_instr_dmi = true;
+	bool use_data_dmi = true;
 
 	/**
 	 * The tracing settings as the trace library wants them.

@@ -22,3 +22,13 @@ single comparison cannot resolve anything smaller.
 Every file records the commit, the branch, whether the tree was dirty, the build options
 that change what the VP does, and the machine, so a comparison can say when two numbers are
 not comparable instead of reporting the difference as a result.
+
+## What the recorded flags do not cover
+
+A snapshot records the flags it passed, not the VP's defaults. Two defaults changed on
+2026-09-29 and a comparison across that date will attribute them to the commit:
+
+* direct memory access is now on, worth about 30 percent, and
+* `occurrence` no longer takes 32 bytes per node.
+
+Comparisons within either side of that date are sound.

@@ -7,9 +7,9 @@ option(USE_SYSTEM_SYSTEMC "use systemc version provided by the system" OFF)
 
 # maximum length of the traced instruction sequences. Nodes keep static arrays of this size,
 # so it is fixed at compile time. The effective depth can be lowered at runtime with --trace-depth.
-set(INSTRUCTION_TREE_DEPTH "" CACHE STRING "maximum instruction tree depth (default: 20, see trace.h)")
+set(INSTRUCTION_TREE_DEPTH "" CACHE STRING "maximum instruction tree depth (default: 20, see vp/src/trace/trace.h)")
 
-# optional trace features, see vp/src/core/common/trace.h
+# optional trace features, see vp/src/trace/trace.h
 option(NO_TRACE_PARAMETER_IMMEDIATES "do not record decoded immediates (smaller traces, faster)" OFF)
 option(NO_TRACE_PREDECESSOR_PCS "do not record predecessor pcs per register set" OFF)
 option(NO_TRACE_BRANCH_OUTCOMES "do not record per-pc branch taken/not-taken counts" OFF)
@@ -51,7 +51,7 @@ if(USE_SYSTEM_SYSTEMC)
 	find_library(SystemC libsystemc.a)
 endif()
 
-subdirs(src)
+add_subdirectory(src)
 
 enable_testing()
 list(APPEND CMAKE_CTEST_ARGUMENTS "--verbose")
@@ -98,11 +98,14 @@ add_custom_target(minimal
 	COMMENT "Build minimal set of riscv-vp binaries (no GUI/hwitl/virtual-breadboard/test32)"
 )
 
+# The binaries a change is normally checked against. tiny64-vp is here because the trace
+# reference check runs a case on it, and a stale binary would pass that case silently.
 add_custom_target(essential
 	DEPENDS
 		riscv-vp
 		linux32-vp
 		tiny32-vp
+		tiny64-vp
 		microrv32-vp
 	COMMENT "Build essential set of riscv-vp binaries (no GUI/hwitl/virtual-breadboard/test32)"
 )

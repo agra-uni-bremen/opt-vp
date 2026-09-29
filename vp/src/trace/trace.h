@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include <bitset>
+#include <algorithm>
 #include <fstream>
 #include <new>
 #include <vector>
@@ -33,10 +34,10 @@
 //threshold of 0.03 d50 -> 0.0233s
 //threshold of 0.01 d50 -> 0.0533s 
 
+//phase boundaries as step ids, for the per node phase counters described in InstructionNode
 #define O_STARTUP 1000
 #define O_BEGINNING 10000
-#define O_MID 3000000 //TODO use input instead
-//#define O_END
+#define O_MID 3000000
 
 #define trace_pcs
 #define log_pcs
@@ -395,12 +396,29 @@ struct ParameterCounter {
 };
 #endif
 
+#ifdef trace_predecessor_pcs
+//one pc and how often it was seen, for the predecessor list of a register set entry
+struct PcCounter {
+	uint64_t pc;
+	uint64_t count;
+};
+#endif
+
+//! What one pc of a node did: its registers, how often it ran there, which pc it came from and
+//! which parameter values it carried.
 struct RegisterSetCounter {
-	int count;
+	//! Occurrences at this pc. 64 bit because a hot node reaches the occurrence count of the
+	//! whole run, which passes four billion in a long one.
+	uint64_t count;
 	RegisterSet regset;
 	#ifdef trace_predecessor_pcs
-	//pc this entry was reached from -> how often. A node usually has one or two distinct predecessors
-	std::map<uint64_t, uint64_t> predecessors;
+	//pc this entry was reached from, and how often. Measured over the embench set, 99 percent of
+	//entries have exactly one predecessor and the most any had was four, so the first one is kept
+	//here and the rest in a vector. A map here cost a tree lookup and an allocation per node per
+	//executed instruction.
+	uint64_t first_predecessor_pc = 0;
+	uint64_t first_predecessor_count = 0;
+	std::vector<PcCounter> more_predecessors;
 	#endif
 	#ifdef trace_parameter
 	//parameter values seen at this pc. Almost always a single entry (a constant immediate), so a
@@ -409,6 +427,40 @@ struct RegisterSetCounter {
 	#endif
 	RegisterSetCounter(int8_t rs1, int8_t rs2, int8_t rd)
 		: count(1), regset(rs1, rs2, rd) {}
+
+	#ifdef trace_predecessor_pcs
+	void count_predecessor(uint64_t pc){
+		//a count of zero means nothing has been recorded yet; pc 0 is a real value
+		if(first_predecessor_count == 0 || first_predecessor_pc == pc){
+			first_predecessor_pc = pc;
+			first_predecessor_count++;
+			return;
+		}
+		for (PcCounter& entry : more_predecessors) {
+			if(entry.pc == pc){
+				entry.count++;
+				return;
+			}
+		}
+		more_predecessors.push_back({pc, 1});
+	}
+
+	bool has_predecessors() const {
+		return first_predecessor_count != 0;
+	}
+
+	//! Every predecessor and its count, pc ordered, which is the order the exports write.
+	std::vector<PcCounter> predecessors_in_pc_order() const {
+		std::vector<PcCounter> all;
+		if(first_predecessor_count != 0){
+			all.push_back({first_predecessor_pc, first_predecessor_count});
+		}
+		all.insert(all.end(), more_predecessors.begin(), more_predecessors.end());
+		std::sort(all.begin(), all.end(),
+				[](const PcCounter& a, const PcCounter& b){ return a.pc < b.pc; });
+		return all;
+	}
+	#endif
 
 	#ifdef trace_parameter
 	void count_parameter(int64_t value){
@@ -619,11 +671,19 @@ class InstructionNode{
 		std::bitset<32> inputs_;
 		std::bitset<32> outputs_;
 
-		//how often this node ran in each phase of the program, which would say whether an
-		//instruction belongs to startup, to initialization or to the real workload.
-		//Never written: the phase boundaries are fixed step ids (O_STARTUP and the rest) and the
-		//length of the run is unknown while it is being traced, so they cannot be placed.
-		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
+		//No per node phase counters, and the trace's `occurrence` field is four zeros.
+		//
+		//The intent was to say where in the lifetime of a run an instruction belongs: startup,
+		//initialization, or the real workload. Two designs for it do not work.
+		//
+		//Four counters split by fixed step ids (the O_STARTUP, O_BEGINNING and O_MID constants
+		//below) cannot place their boundaries, because the length of the run is unknown while it
+		//is being traced.
+		//
+		//One running sum of the step ids a node occurred at, divided by its weight at the end,
+		//overflows. A node can be updated at every step and every step id goes up to the total
+		//instruction count, so the sum is bounded by that count squared, which exceeds a 64 bit
+		//integer. Normalising after the run does not prevent the overflow during it.
 
 		// ------------------------------------------------------------- what this node is
 

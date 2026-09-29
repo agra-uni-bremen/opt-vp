@@ -1,4 +1,4 @@
-subdirs(softfloat)
+add_subdirectory(softfloat)
 if(NOT USE_SYSTEM_SYSTEMC)
     include(ExternalProject)
     ExternalProject_Add(
