@@ -18,8 +18,8 @@ float default_score(ScoreParams p) {
 }
 
 //! Find the tree a path starts in. Every path came out of a tree, so this always succeeds.
-InstructionNodeR *find_tree(std::list<InstructionNodeR> &trees, Opcode::Mapping root) {
-	for (InstructionNodeR &tree : trees) {
+InstructionNode *find_tree(std::list<InstructionNode> &trees, Opcode::Mapping root) {
+	for (InstructionNode &tree : trees) {
 		if (tree.instruction == root) {
 			return &tree;
 		}
@@ -36,7 +36,7 @@ std::vector<Path> sorted_by_score_descending(const std::vector<Path> &sequences,
 }
 
 //! Every opcode the program never executed, which is every opcode with no tree.
-size_t count_unused_instructions(std::list<InstructionNodeR> &trees) {
+size_t count_unused_instructions(std::list<InstructionNode> &trees) {
 	size_t unused = 0;
 	for (size_t i = Opcode::Mapping::ADD; i < Opcode::Mapping::NUMBER_OF_INSTRUCTIONS; i++) {
 		Opcode::Mapping op = static_cast<Opcode::Mapping>(i);
@@ -62,7 +62,7 @@ void collect_sequence_nodes(TraceReport &report, const std::vector<Path> &sequen
 	printf("\n -----------------\n| Best Sequences |\n -----------------\n");
 
 	for (const Path &p : sequences) {
-		InstructionNodeR *found_tree = find_tree(report.trees, p.opcodes[0]);
+		InstructionNode *found_tree = find_tree(report.trees, p.opcodes[0]);
 		if (found_tree == nullptr) {
 			// This should never happen: a path exists only because a tree held it.
 			printf("[ERROR] Could not find matching tree for discovered path\nOpcode: %s\n",
@@ -166,7 +166,7 @@ void run_trace_report(TraceReport &report) {
 	std::vector<Path> discovered_sequences;
 	printf("start analysis\n");
 	int tree_index = 0;
-	for (InstructionNodeR &tree : report.trees) {
+	for (InstructionNode &tree : report.trees) {
 		std::vector<Path> top_paths = tree.extend_top_paths(
 		    {1, 0, 1.0, tree_index, -1, Opcode::Mapping::UNDEF, score}, report.config.coverage_top_n);
 		discovered_sequences.insert(discovered_sequences.end(), top_paths.begin(), top_paths.end());

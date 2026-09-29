@@ -65,7 +65,7 @@ void export_trees(const TraceReport &report) {
 	std::cout << "writing json to directory " << report.config.output_directory << std::endl;
 
 	std::string application_name = program_basename(report.config.input_program);
-	for (InstructionNodeR &tree : report.trees) {
+	for (InstructionNode &tree : report.trees) {
 		std::string single_output_filename = report.config.output_directory + application_name +
 		                                     std::string(Opcode::mappingStr[tree.instruction]) +
 		                                     hart_suffix(report.config) + std::string(".json");

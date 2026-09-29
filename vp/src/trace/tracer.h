@@ -39,7 +39,7 @@ class Tracer {
 	}
 
 	//! One tree per instruction that started a window.
-	std::list<InstructionNodeR> &trees() {
+	std::list<InstructionNode> &trees() {
 		return trees_;
 	}
 
@@ -98,20 +98,27 @@ class Tracer {
 	            const MemoryAccessMap *memory_accesses);
 
   private:
-	//! The tree for an opcode, creating it on the opcode's first occurrence.
-	InstructionNodeR &tree_for(Opcode::Mapping op) {
-		for (InstructionNodeR &root : trees_) {
-			if (root.instruction == op) {
-				return root;
-			}
-		}
-		trees_.emplace_back(op, 0);
-		return trees_.back();
+	//! The tree for an opcode. Looked up by opcode rather than searched for: this runs once per
+	//! executed instruction, and a real program reaches a hundred trees.
+	InstructionNode &tree_for(Opcode::Mapping op) {
+		InstructionNode *root = roots_[op];
+		return root ? *root : start_tree(op);
 	}
+
+	/**
+	 * Start the tree for an opcode, on its first occurrence.
+	 *
+	 * The root of a tree is a plain node whatever its opcode, so it carries no memory or branch
+	 * payload. `trees_` is a list, so a root keeps its address as further trees are added.
+	 */
+	InstructionNode &start_tree(Opcode::Mapping op);
 
 	TraceConfig config_;
 	//! The last `trace_depth` steps, oldest at `index_`.
 	std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH> steps_{};
-	std::list<InstructionNodeR> trees_;
+	//! The trees in the order they were started, which is the order the exports write them in.
+	std::list<InstructionNode> trees_;
+	//! The same trees indexed by their root opcode. Null until an opcode occurs.
+	std::array<InstructionNode *, Opcode::NUMBER_OF_INSTRUCTIONS> roots_{};
 	uint8_t index_ = 0;
 };

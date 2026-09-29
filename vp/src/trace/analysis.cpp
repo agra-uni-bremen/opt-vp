@@ -29,14 +29,14 @@ LoadedLibrary load_scoring_functions(const std::string& libraryPath){
 	return {library, *score_functions_ptr};
 }
 
-void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNodeR> instruction_trees){
+void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNode> instruction_trees){
 	std::vector<std::vector<Path>> best_sequences_for_sf; 
 	uint32_t score_function_index = 0;
 	for ([[maybe_unused]] auto &&score_function : score_functions)
 	{
 		std::vector<Path> tmp_best_sequences; 
 		auto _sf = score_functions[score_function_index];
-		for(InstructionNodeR& tree : instruction_trees){
+		for(InstructionNode& tree : instruction_trees){
 			Path p = tree.extend_path(
 				{1, 0, 1.0, 0, -1, Opcode::Mapping::UNDEF, _sf});
 			tmp_best_sequences.push_back(p);

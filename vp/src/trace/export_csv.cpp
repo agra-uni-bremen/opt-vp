@@ -59,12 +59,12 @@ void export_csv(const TraceReport &report) {
 
 	std::map<InstructionType, uint32_t> instruction_types;
 	uint64_t total_max_weight = 0;
-	for (InstructionNodeR &tree : report.trees) {
+	for (InstructionNode &tree : report.trees) {
 		if (tree.weight > total_max_weight) {
 			total_max_weight = tree.weight;
 		}
 	}
-	for (InstructionNodeR &tree : report.trees) {
+	for (InstructionNode &tree : report.trees) {
 		tree.to_csv({
 		    report.retired_instructions,
 		    Opcode::mappingStr[tree.instruction],
@@ -75,7 +75,7 @@ void export_csv(const TraceReport &report) {
 		    tree.weight,
 		    tree.weight,  // last_weight
 		    total_max_weight,
-		    tree.get_pc().size(),
+		    tree.max_pc_count(),
 		});
 	}
 

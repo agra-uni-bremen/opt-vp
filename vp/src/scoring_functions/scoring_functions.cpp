@@ -2,7 +2,7 @@
 #include <array>
 #include <functional>
 
-#include "../core/common/trace.h"
+#include "trace/score.h"
 
 // struct ScoreParams {
 // 	Opcode::Mapping instr; 

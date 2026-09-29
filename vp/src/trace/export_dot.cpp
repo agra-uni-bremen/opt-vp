@@ -4,7 +4,7 @@
 #include <fstream>
 #include <iostream>
 
-// `InstructionNodeR::tree_to_dot` writes through `std::cout`, so writing a graph to a file
+// `InstructionNode::tree_to_dot` writes through `std::cout`, so writing a graph to a file
 // means pointing `std::cout` at that file for the duration. See the note in export.h.
 
 namespace {
@@ -35,7 +35,7 @@ void export_dot(const TraceReport &report) {
 	if (report.config.output_directory.empty()) {
 		// No directory to write to, so the whole thing goes to standard output as one graph.
 		write_graph_header();
-		for (InstructionNodeR &tree : report.trees) {
+		for (InstructionNode &tree : report.trees) {
 			tree.tree_to_dot(report.retired_instructions, report.config.graph_branch_threshold);
 		}
 		std::cout << "}" << std::endl;
@@ -47,7 +47,7 @@ void export_dot(const TraceReport &report) {
 	std::cout << "writing dot files to directory " << report.config.output_directory << std::endl;
 
 	// one dot file per opcode, named after the tree's root instruction
-	for (InstructionNodeR &tree : report.trees) {
+	for (InstructionNode &tree : report.trees) {
 		std::ofstream output(report.config.output_directory +
 		                     std::string(Opcode::mappingStr[tree.instruction]) + hart_suffix(report.config) +
 		                     std::string(".dot"));

@@ -21,7 +21,9 @@ The VP repository is quite large, but most tasks usually only touch a handful of
 
 /vp : the code for the simulator lives in this directory. 
 /vp/src/core : the main part of the simulator including fetch decode execute. Common contains shared definitions while rv32 and rv64 implement the 32 and 64 bit RISC-V ISA respectively. 
-/vp/src/core/common/trace.h, trace.cpp: this is the core for constructing the execution sequence trees and generating the JITR output. 
+/vp/src/trace: everything about execution sequence trees. trace.h/trace.cpp hold the node type
+that builds them, tracer.h the per core recorder the ISS drives, and export_*.cpp the outputs
+including the JITR json. score.h is the interface a --scoring-library plugin compiles against. 
 /vp/src/core/common/instr.h: instruction masks and encodings. 
 /vp/src/core/common/mmu.h: memory management. 
 /vp/src/core/rv32/iss.h and iss.cpp: The heart of the VP. Contains the main code for the instruction set simulator and almost any change will touch this file. 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/common/instr.h"
+#include "trace/score.h"
 #include <set>
 #include <tuple>
 #include <unordered_set>
@@ -8,6 +9,8 @@
 
 #include <bitset>
 #include <fstream>
+#include <new>
+#include <vector>
 
 #include "lib/json/single_include/nlohmann/json.hpp"
 
@@ -25,7 +28,6 @@
 #define JSON_INDENT -1
 #define SIMILARITY_ALGORITHM 1 //1 for jaccard, 2 for levenshtein
 #define MAX_VARIANTS 3
-#define SF_BATCH_SIZE 3
 #define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
 //no pruning md5 d50 -> 0.356s per function for all trees
 //threshold of 0.03 d50 -> 0.0233s
@@ -99,7 +101,7 @@ enum class InstructionType {
 	Float_R4,
 };
 
-enum class NODE_TYPE {
+enum class NODE_TYPE : uint8_t {
 	BASE = 0,
 	NODE = 1, 
 	LEAF = 2, 
@@ -197,9 +199,13 @@ struct ExecutionInfo {
 	uint64_t last_step_id = 0;
 };
 
-struct StepInsertInfo {
+//! Everything one executed instruction contributes to the node it lands on.
+//! One struct for the whole insert path: `insert_rb` fills it once per step of a window and
+//! `insert` passes the same object down, rather than copying 128 bytes per node.
+struct StepInfo {
     Opcode::Mapping op;
     uint64_t pc;
+    //offset back to the instruction that wrote this one's first/second source register, or -1
     int8_t true_dependency1;
     int8_t true_dependency2;
     std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
@@ -211,6 +217,7 @@ struct StepInsertInfo {
     int8_t input1; //equal to rs1 if rs1 was not written to by another instruction in the sequence, -1 otherwise
     int8_t input2; 
     int8_t output;
+    //! Position in the window, so also the depth of the node this describes. 0 is the root.
     uint32_t depth;
     uint64_t step;
 	uint64_t cycles;
@@ -218,7 +225,6 @@ struct StepInsertInfo {
 	AccessType access_type;
 	uint64_t stack_pointer;
 	uint64_t frame_pointer;
-	// Parameter tracking fields
 	int64_t parameter; // shift amount, branch/jump target or decoded immediate (NO_PARAMETER if none)
 	const char* peripheral_name = nullptr;
 	uint64_t predecessor_pc;
@@ -226,47 +232,6 @@ struct StepInsertInfo {
 	int64_t branch_offset;
 };
 
-struct ScoreParams {
-	Opcode::Mapping instr; 
-	Opcode::Mapping tree; 
-	uint64_t weight; 
-	// uint64_t true_weight;
-	uint32_t length; 
-	double dep_score;
-	uint32_t num_children;
-	uint32_t inputs;
-	uint32_t outputs; 
-	float score_multiplier; 
-	float score_bonus; 
-// uint32_t num_pcs;
-};
-
-using ScoreFunction = std::function<float(ScoreParams)>;
-
-struct StepUpdateInfo {
-    int8_t dependency1;
-    int8_t dependency2;
-    std::bitset<INSTRUCTION_TREE_DEPTH> output_dependencies;
-    std::bitset<INSTRUCTION_TREE_DEPTH> anti_dependencies;
-	uint8_t rs1;
-	uint8_t rs2;
-	uint8_t rd;
-    int8_t input1;
-    int8_t input2;
-	int8_t output;
-    uint64_t pc;
-    uint64_t step;
-	uint64_t cycles;
-	uint64_t memory_address;
-	AccessType access_type;
-	uint64_t stack_pointer;
-	uint64_t frame_pointer;
-	int64_t parameter; // shift amount, branch/jump target or decoded immediate (NO_PARAMETER if none)
-	const char* peripheral_name = nullptr;
-	uint64_t predecessor_pc;
-	BranchOutcome branch_outcome;
-	int64_t branch_offset;
-};
 
 class InstructionNode;
 
@@ -459,653 +424,11 @@ struct RegisterSetCounter {
 };
 
 
-class InstructionNode{
-	public:
-		InstructionNode(){
-
-		}
-
-		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash)
-				: instruction(instruction), weight(0){
-					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
-		}
-
-		Opcode::Mapping instruction;
-		//the number of times this node occurred
-		uint64_t weight;
-		//weight counting only unique paths that contain this node
-		//exclude paths that already contain this node with another prefix (e.g. ADD -> SUB -> ADD -> SUB)
-		//used to calculate the coverage of a sequence (length * true_weight) 
-		//using the normal weight can lead to overestimation of coverage (sequence > 100% coverage)
-		uint64_t true_weight = 0;
-
-		//last step id this node occurred in
-		//used to lock true_weight  to prevent counting the same path multiple times
-		//update last_occurrence when true_weight is updated
-		//a node at this depth ends a window of depth+1 instructions, so the next window is
-		//disjoint from the last counted one only if its step id > last_occurrence + depth
-		uint64_t last_occurrence = 0;
-
-		uint64_t total_cycles = 0;
-		//sum of the step ids this node occurred in
-		//dividing by weight results in the average region of the programs lifetime this node occurs most frequently
-		//uint64_t sum_step_ids = 0;
-		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
-		//entry i is set when this node reads a value written i instructions earlier in the window
-		//(1 = written by the parent). Entry 0 is never set: a node does not depend on itself.
-		//a byte per offset rather than a bit mask: the two writes on the insert path are then
-		//independent stores instead of a read-modify-write of one shared word, which measures
-		//about 1.5 percent faster over the embench set. Must be zero initialized here, because
-		//a node is created with new and a plain member array would be left indeterminate.
-		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_ = {};
-		//index of other nodes this node has a anti/output dependency to
-		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
-		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_output_;
-
-		std::bitset<32> inputs_;
-		std::bitset<32> outputs_;
-
-		//! Does this node read a value written `offset` instructions earlier in the window?
-		bool depends_true_on(size_t offset) const {
-			return dependencies_true_[offset];
-		}
-
-		//! How many earlier instructions in the window this node reads a value from.
-		uint32_t true_dependency_count() const {
-			uint32_t count = 0;
-			for (size_t i = 0; i < trace_depth; i++) {
-				if (dependencies_true_[i]) {
-					count++;
-				}
-			}
-			return count;
-		}
-
-
-		#ifdef trace_individual_registers
-		std::map<uint64_t, RegisterSetCounter> register_sets;
-		#endif
-
-		uint64_t subtree_hash = 0;
-
-		//additional metrics
-
-
-		virtual InstructionNode* insert(const StepInsertInfo& p) = 0;
-
-		virtual float get_score_bonus(){
-			using namespace Opcode;
-			switch (instruction)
-			{
-			case BEQ:
-			case BNE:
-			case BLT:
-			case BLTU:
-			case BGE:
-			case BGEU:
-			case JAL:
-			case JALR:
-				//branch instruction calling base score function
-				//see get_score_multiplier()
-				return -1.0;
-				break;
-			default:
-		#ifndef dependency_score
-			return 0.0;
-		#else
-			//check for any dependencies
-			uint64_t dependencies_count = true_dependency_count();
-
-			if(dependencies_count>0){
-				return -(float)dependencies_count/10.0;
-			}else{
-				return 2.0;
-			}
-			return 0.0;
-
-		#endif
-				break;
-			}
-		}
-		virtual float get_score_multiplier(){
-			using namespace Opcode;
-			switch (instruction)//TODO probably just use a lookup table
-			{
-			case ADD:
-				return 1.0;
-				break;
-			case BEQ:
-			case BNE:
-			case BLT:
-			case BLTU:
-			case BGE:
-			case BGEU:
-			case JAL:
-			case JALR:
-				//branch instruction calling base score function
-				//this should only happen with the root node which is currently always a base R node
-				//in case the root node is a branch, multiply global score by one, 
-				//but set score bonus to -1
-				//this essentially removes the node from the tree, which means there should always be 
-				//exactly one other sequence with the same score and identical instructions, excluding the branch
-				return 1.0;
-				break;
-			
-			default:
-				break;
-			}
-			
-			return 1.0;
-		}
-
-
-		virtual double get_inv_dep_score(){
-			using namespace Opcode;
-			double result = 0.0;
-			switch (instruction)
-			{
-			case BEQ:
-			case BNE:
-			case BLT:
-			case BLTU:
-			case BGE:
-			case BGEU:
-				return result;
-				break;
-			default:
-
-			//check for any dependencies
-			//TODO: include depth so we do not have to iterate over unnecessary empty entries
-			for (size_t i = 1; i < trace_depth; i++)
-			{
-			if(depends_true_on(i)){
-				result += 1/(double)i; //i should never be 0 as a node does not depend on itself
-			}
-			if(dependencies_output_[i]){
-				result += 1/(double)i;
-			}
-			if(dependencies_anti_[i]){
-				result += 1/(double)i;
-			}
-			}
-
-				return result;
-				break;
-			}
-		}
-
-		uint32_t count_true_dependencies(){
-			return true_dependency_count();
-		}
-
-		void print(){
-			const char* instruction_string = "UNKWN ";
-			if(instruction < Opcode::mappingStr.size()){
-				instruction_string = Opcode::mappingStr[instruction];
-			}
-			std::cout << "--------\n";
-			std::cout << "](" << instruction_string << ")[\n";
-			std::cout << "--" << weight << "--\n";
-			_print(1);
-		}
-
-		virtual void _print(uint8_t level) = 0;
-
-		/**
-		 * Write this tree as dot. `branch_threshold` omits any branch carrying less than that
-		 * share of the tree's weight, which keeps a graph of a real program readable; pass 0
-		 * to draw every branch.
-		 */
-		void tree_to_dot(uint64_t total_instructions, float branch_threshold){
-			std::stringstream dot_stream; 
-			std::stringstream connections_stream; 
-
-			//now defined in iss
-			//dot_stream << "digraph g{" << std::endl;
-			//dot_stream << "node [shape = record, style=\"bold\", height = .5, colorscheme=rdpu9];" << std::endl; //pubu9
-
-			dot_stream << "//Nodes" << std::endl;
-			connections_stream << "//Connections" << std::endl;
-
-			const char* instruction_string = "UNKWN ";
-			if(instruction < Opcode::mappingStr.size()){
-				instruction_string = Opcode::mappingStr[instruction];
-			}
-
-			to_dot(instruction_string, "", 0, 0, 0, 
-				dot_stream,connections_stream,
-				weight,total_instructions, 
-				branch_threshold > 0.0f, branch_threshold);
-
-
-			dot_stream << connections_stream.str();
-
-			std::cout << dot_stream.str() << std::endl;
-		}
-		
-		virtual nlohmann::ordered_json to_json(){
-			
-			nlohmann::ordered_json jsonNode;
-			jsonNode["instruction"] = Opcode::mappingStr[instruction];
-			jsonNode["type"] = get_node_type();
-			jsonNode["weight"] = weight;
-			jsonNode["true_weight"] = true_weight;
-			jsonNode["subtree_hash"] = subtree_hash;
-
-			#ifdef trace_individual_registers
-				nlohmann::json jsonRegisterSets = nlohmann::json::object();
-				for (const auto& entry : register_sets) {
-					uint64_t key = entry.first;
-					const RegisterSetCounter& rsc = entry.second;
-					nlohmann::json jsonEntry = { {"count", rsc.count}, {"rs1", rsc.regset.rs1}, {"rs2", rsc.regset.rs2}, {"rd", rsc.regset.rd} };
-					#ifdef trace_predecessor_pcs
-					if (!rsc.predecessors.empty()) {
-						nlohmann::json jsonPredecessors = nlohmann::json::object();
-						for (const auto& predecessor : rsc.predecessors) {
-							jsonPredecessors[std::to_string(predecessor.first)] = predecessor.second;
-						}
-						jsonEntry["predecessors"] = jsonPredecessors;
-					}
-					#endif
-					jsonRegisterSets[std::to_string(key)] = jsonEntry;
-				}
-				jsonNode["register_sets"] = jsonRegisterSets;
-			#endif 
-			//convert dependencies
-			std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
-			std::set<int8_t> anti_dependencies;
-			std::set<int8_t> output_dependencies;
-
-			for (size_t i = 1; i < trace_depth; i++){
-					if(depends_true_on(i)){
-						true_dependencies.push_back(i);
-					}
-					if (dependencies_anti_[i]) {
-						anti_dependencies.insert(i);
-					}
-					if (dependencies_output_[i]) {
-						output_dependencies.insert(i);
-					}
-			}
-
-			std::set<int8_t> inputs;
-			std::set<int8_t> outputs;
-
-			for (size_t i = 0; i < 32; i++){
-					if(inputs_[i]){
-						inputs.insert(i);
-					}
-					if (outputs_[i]) {
-						outputs.insert(i);
-					}
-			}
-
-			nlohmann::json jsonDependencies1 = true_dependencies;
-			jsonNode["dependencies_true"] = jsonDependencies1;
-			nlohmann::json jsonDependencies2 = anti_dependencies;
-			jsonNode["dependencies_anti"] = jsonDependencies2;
-			nlohmann::json jsonDependencies3 = output_dependencies;
-			jsonNode["dependencies_output"] = jsonDependencies3;
-
-			jsonNode["inputs"] = inputs;
-			jsonNode["outputs"] = outputs;
-
-			jsonNode["occurrence"] = occurrence;
-			
-			#ifdef trace_parameter
-			//same shape as before the values moved into register_sets: [[pc, [[value, count], ...]], ...]
-			nlohmann::json jsonParameters = nlohmann::json::array();
-			for (const auto& entry : register_sets) {
-				if(entry.second.parameters.empty()){
-					continue;
-				}
-				nlohmann::json jsonValues = nlohmann::json::array();
-				for (const ParameterCounter& value : entry.second.parameters) {
-					jsonValues.push_back({value.value, value.count});
-				}
-				jsonParameters.push_back({entry.first, jsonValues});
-			}
-			jsonNode["parameters"] = jsonParameters;
-			#endif
-
-			return jsonNode;
-	}
-
-		//might be easier to use a struct but this way its harder to miss a parameter
-		virtual std::stringstream csv_format(uint64_t parent_hash, const char* tree, const char* instruction_string,
-										uint64_t last_weight, uint64_t max_weight, uint64_t total_max_weight, uint32_t depth, 
-										double current_dep_score, double current_total_dep_score, 
-										uint32_t current_true_dep, uint32_t current_anti_dep, uint32_t current_out_dep, 
-										uint32_t total_true_dep, uint32_t total_anti_dep, uint32_t total_out_dep, 
-										uint32_t num_children, uint32_t num_current_total_inputs, uint32_t num_current_total_outputs, 
-										uint32_t num_branches, uint64_t number_of_pcs, uint64_t max_pcs){
-			std::stringstream csv_stream; 
-			csv_stream << subtree_hash << ";" //ID
-					<< parent_hash << ";" //parent subtree hash
-					<< tree << ";" //Tree
-					<< instruction_string << ";" //This instruction 
-					<< weight << ";"
-					<< true_weight << ";"
-					<< last_weight - weight << ";"
-					<< max_weight - weight << ";"
-					<< total_max_weight - weight << ";"
-					<< depth << ";" //Length
-					<< trace_depth - depth << ";" //Length
-					<< -1 << ";" //cycles used by sequence for one iteration
-					<< current_dep_score << ";"
-					<< current_total_dep_score << ";"
-					<< current_true_dep << ";"
-					<< current_anti_dep << ";"
-					<< current_out_dep << ";"
-					<< total_true_dep << ";" 
-					<< total_anti_dep << ";" 
-					<< total_out_dep << ";" 
-					<< num_children << ";" //children
-					<< Opcode::NUMBER_OF_INSTRUCTIONS - num_children << ";"
-					<< inputs_.count() << ";"
-					<< num_current_total_inputs << ";"
-					<< outputs_.count() << ";"
-					<< num_current_total_outputs << ";"
-					<< -1 << ";" //TODO Instruction Types
-					<< num_branches << ";" //Number of Branches
-					<< occurrence[0] << ";"
-					<< occurrence[1] << ";"
-					<< occurrence[2] << ";"
-					<< occurrence[3] << ";"
-					<< number_of_pcs << ";"
-					<< max_pcs - number_of_pcs << ";";
-
-			return csv_stream;
-		}
-
-		virtual void to_csv(const CsvParams& p){
-			std::stringstream csv_stream; 
-			std::map<InstructionType, uint32_t> _instruction_types = 
-											p.instruction_types;
-
-			double current_dep_score = get_inv_dep_score();
-			double current_total_dep_score = p.last_dep_score + current_dep_score;
-
-			uint32_t current_true_dep = count_true_dependencies();
-			uint32_t current_anti_dep = dependencies_anti_.count();
-			uint32_t current_out_dep = dependencies_output_.count();
-
-			uint32_t total_true_dep = p.true_dep +  current_true_dep;
-			uint32_t total_anti_dep = p.anti_dep + current_anti_dep;
-			uint32_t total_out_dep = p.out_dep + current_out_dep;
-
-			std::bitset<32> current_total_inputs = p.total_inputs | inputs_;
-			std::bitset<32> current_total_outputs = p.total_outputs | outputs_;
-
-			uint64_t number_of_pcs = get_pc().size();
-			_instruction_types[getInstructionType(instruction)]++;
-
-			const char* instruction_string = "UNKWN ";
-			if(instruction < Opcode::mappingStr.size()){
-				instruction_string = Opcode::mappingStr[instruction];
-			}
-				csv_stream = csv_format(p.parent_hash, p.tree, instruction_string, p.last_weight ,p.max_weight, p.total_max_weight, 
-								p.depth, current_dep_score, current_total_dep_score, 
-								current_true_dep, current_anti_dep, current_out_dep, 
-								total_true_dep, total_anti_dep,total_out_dep, 
-								0, current_total_inputs.count(), 
-								current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
-								number_of_pcs, p.max_pcs);
-
-			std::cout << csv_stream.str() << std::endl;
-		}
-
-		virtual std::map<uint64_t, int> get_pc() = 0;
-
-		virtual std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
-									uint depth, uint id, uint64_t parent_hash, 
-									std::stringstream& dot_stream,  std::stringstream& connections_stream,
-									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold) = 0;
-
-		float dot_hue(uint depth){
-			return (float)depth/(float)trace_depth;
-		}
-		float dot_sat(uint depth, uint depender){
-			//TODO higher saturation and value for instr with multiple children depending on it
-			return 1.0;
-		}
-		float dot_val(uint depth, uint depender){
-			return 1.0;
-		}
-		//dependencies should be 0 if not applicable
-		virtual void update_weight(const StepUpdateInfo& p, uint32_t depth = 0){
-			weight++; 
-			total_cycles += p.cycles;
-			//sum_step_ids += p.step; //TODO add curent step
-			
-			// Update true_weight only if this window does not overlap the last counted one.
-			// p.step is the step id of the window's last instruction and the window is
-			// depth+1 instructions long, so it must start after the last counted one ended.
-			// The first occurrence is always counted: it can end at step id depth, which the
-			// comparison alone would reject.
-			if (true_weight == 0 || (last_occurrence + depth) < p.step) {
-				true_weight++;
-				last_occurrence = p.step;
-			}
-
-			#ifdef trace_individual_registers
-			//everything that is tracked per pc shares this single lookup, it runs for every node of
-			//every executed instruction
-			auto it = register_sets.find(p.pc);
-			if(it == register_sets.end()) {
-				it = register_sets.emplace(p.pc, RegisterSetCounter{static_cast<int8_t>(p.rs1), static_cast<int8_t>(p.rs2), static_cast<int8_t>(p.rd)}).first;
-			} else {
-				it->second.count++;
-			}
-			#ifdef trace_predecessor_pcs
-			//which pc this occurrence was actually reached from, so later, a pc path can be proven instead of guessed
-			it->second.predecessors[p.predecessor_pc]++;
-			#endif
-			#ifdef trace_parameter
-			//record the value the ISS decoded for this instruction: shift amount, branch/jump target or,
-			//with trace_parameter_immediates, the decoded immediate. Values may be negative.
-			if (p.parameter != NO_PARAMETER
-					#ifndef trace_root_parameters
-					//tracking the root node costs one entry per pc executing this opcode with little benefit
-					&& depth > 0
-					#endif
-				) {
-				it->second.count_parameter(p.parameter);
-			}
-			#endif
-			#endif
-			#ifdef handle_self_modifying_code
-			else{
-				auto it = register_sets.find(p.pc);
-				RegisterSet rset = it->second;
-				if(rset.rs1 != p.input1 || rset.rs2 != p.input2 || rset.rd != p.output){
-					printf("detected binary modification (%x -> %x)\n"), p.pc, 1-p.pc;
-					register_sets.emplace(1-p.pc, RegisterSet{p.input1, p.input2, p.output});
-				}
-			}
-			#endif
-			// if(p.step > O_MID){
-			// 	occurrence[3]++;
-			// }else if(p.step > O_BEGINNING){
-			// 	occurrence[2]++;
-			// }else if(p.step > O_STARTUP){
-			// 	occurrence[1]++;
-			// }else{
-			// 	occurrence[0]++;
-			// }
-			if(p.dependency1>0){
-				dependencies_true_[p.dependency1] = true;
-			}else if(p.input1>=0){
-				inputs_.set(p.input1, true);
-			}
-			if(p.dependency2>0){
-				dependencies_true_[p.dependency2] = true;
-			}else if(p.input2>=0){
-				inputs_.set(p.input2, true);
-			}
-			if(p.output > 0){//ignore outputs for zero reg
-				outputs_.set(p.output, true);
-			}
-			dependencies_anti_ |= p.anti_dependencies;
-    		dependencies_output_ |= p.output_dependencies;
-		}
-
-		//called recursively for children and extends path if new score > old score
-		//force_extension always extends the path with child at 
-		//depth == force_extension_depth and child_instruction == instruction
-		//if force extension == -1 -> don't force any extension
-		//non R Nodes ignore force_extension as they don't have any children
-		virtual Path extend_path(const PathExtensionParams& p){
-			Path max_path;
-			max_path.length = p.length;
-			max_path.minimum_weight = weight;
-
-			//score multiplier for this singular node
-			//we can't simply pass its weight * mult as score as the weight changes when extending the path  
-			//instead track a bonus multiplier that adds mult * min_weight to the score 
-			//can be negative
-			float score_bonus_of_this_node = get_score_bonus();
-			//global score multiplier of this node
-			//including branches etc. should reduce the score of the whole path, so its not chosen
-			float score_multiplier_of_this_node = get_score_multiplier();
-
-			max_path.score_bonus = p.score_bonus + score_bonus_of_this_node;
-			max_path.score_multiplier = 
-			p.score_multiplier * score_multiplier_of_this_node; 
-			max_path.inverse_dependency_score = get_inv_dep_score();
-
-			max_path.opcodes.push_back(instruction);
-			max_path.path_hashes.push_back(subtree_hash);
-
-			max_path.end_of_sequence = this;
-
-			return max_path;
-
-		}
-
-		virtual std::vector<Path> extend_top_paths(const PathExtensionParams& p, size_t top_k){
-			if (top_k == 0)
-				return {};
-
-			Path path = extend_path(p);
-			if (path.length == 0)
-				return {};
-
-			return {path};
-		}
-
-		//might happen if best sequence length == Max Tree Depth
-		virtual std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function){
-			printf("Warning: Forcing path extension of non R Node\nConsider increasing the maximum tree depth\n");
-			return {};
-		}
-
-		virtual std::vector<PathNode> path_to_path_nodes(Path path, uint depth){
-			std::vector<PathNode> nodes; 
-
-			std::set<int8_t> indices_anti;
-			std::set<int8_t> indices_out;
-			for (size_t i = 0; i < trace_depth; i++) {
-				if (dependencies_anti_[i]) {
-					indices_anti.insert(i);
-				}
-				if (dependencies_output_[i]) {
-					indices_out.insert(i);
-				}
-			}
-			PathNode n = PathNode(instruction, weight, get_score_bonus(), get_score_multiplier(), get_inv_dep_score(), 
-									get_pc(), 
-									dependencies_true_, indices_out, indices_anti);
-			nodes.push_back(n);
-			return nodes;
-		} 
-
-		//find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
-		// and another possible branch not taken, which would lead to a different sequence 
-		virtual std::vector<BranchingPoint> find_variant_branch(Path path, uint8_t depth){
-			return {}; //no possible branching points for leaf nodes
-		}
-
-		virtual int prune_tree(uint64_t weight_threshold, uint8_t depth){
-			return 0;
-		}
-
-		virtual NODE_TYPE get_node_type(){
-			return NODE_TYPE::BASE;
-		}
-
-};
-
-class InstructionNodeR : virtual public InstructionNode{
-	public:
-		//static const NODE_TYPE node_type = NODE_TYPE::NODE;
-		InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash);
-
-		std::list<InstructionNode*> children;
-
-		//the ring buffer is only read, so it is passed by reference: it is copied once per executed
-		//instruction otherwise, which is 120 bytes per tree depth step
-		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
-						uint32_t next_rb_index);
-		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
-						uint32_t next_rb_index, uint32_t offset);
-
-		InstructionNode* insert(const StepInsertInfo& p) override;
-
-		void _print(uint8_t level) override;
-
-		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
-									uint depth, uint id, uint64_t parent_hash, 
-									std::stringstream& dot_stream,  std::stringstream& connections_stream,
-									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold) override;
-		void to_csv(const CsvParams& p) override;
-
-		nlohmann::ordered_json to_json() override;
-		
-		//finds the most promising optimization sequence for this tree by evaluating every possible sequence
-		Path extend_path(const PathExtensionParams& p) override;
-		std::vector<Path> extend_top_paths(const PathExtensionParams& p, size_t top_k) override;
-		//extend existing path beyond its original endpoint
-		//expects an existing path + first Node new path that should be extended
-		//handles possible branch instructions and the calls extend_path() 
-		std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function) override;
-		std::map<uint64_t, int> get_pc() override;
-
-		std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override; 
-		std::vector<BranchingPoint> find_variant_branch(Path path, uint8_t depth) override;
-		int prune_tree(uint64_t weight_threshold, uint8_t depth) override;
-		NODE_TYPE get_node_type() override;
-};
-
-class InstructionNodeLeaf : virtual public InstructionNode{
-	public:
-		InstructionNodeLeaf(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t pc);
-
-	std::map<uint64_t, int> pc_map;
-
-	InstructionNode* insert(const StepInsertInfo& p) override;
-
-	void _print(uint8_t level) override;
-
-	std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
-									uint depth, uint id, uint64_t parent_hash, 
-									std::stringstream& dot_stream,  std::stringstream& connections_stream,
-									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold) override;
-
-	nlohmann::ordered_json to_json() override;
-
-	virtual void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
-	std::map<uint64_t, int> get_pc() override;
-	NODE_TYPE get_node_type() override;
-};
-
+//! Memory addresses one load or store node touched, and the peripherals they hit.
+//! Allocated with the node (see InstructionNode::create), so only load and store nodes pay for it.
 class MemoryNode{
 	public: 
 		bool is_store = false;
-		//Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;//Stack(current frame=1 else 2) or Heap (4) or both (3,5,6,7)
 		std::unordered_map<uint64_t, std::unordered_map<uint64_t, Opcode::MemoryRegion>> memory_accesses;
 		uint64_t last_access = 0;
 		uint64_t access_offset_sum = 0;
@@ -1139,9 +462,9 @@ struct BranchOutcomeCounter {
 	uint64_t not_taken = 0;
 };
 
+//! Outcomes of one branch or jump node. Allocated with the node, like MemoryNode.
 class BranchNode{
 	public:
-		// std::unordered_map<uint64_t, std::unordered_set<uint64_t>> jump_targets; //Handled as a parameter
 		//relative offset (as unsigned wraparound) -> how often the branch was taken with that offset
 		std::map<uint64_t, uint64_t> relative_offsets;
 		#ifdef trace_branch_outcomes
@@ -1151,7 +474,6 @@ class BranchNode{
 		bool is_forward_jump = false;
 
 		BranchNode(){};
-		BranchNode(int64_t offset);
 
 		nlohmann::ordered_json branch_to_json(){
 			nlohmann::ordered_json json;
@@ -1177,126 +499,268 @@ class BranchNode{
 
 };
 
-class InstructionNodeMemory : public InstructionNodeR, virtual public MemoryNode{
-	public: 
-		InstructionNodeMemory(Opcode::Mapping instruction, uint64_t parent_hash, 
-								uint64_t memory_access, bool is_store_instruction);
+//! Opcodes that get a branch payload: the six conditional branches and the two jumps.
+inline bool is_branch_opcode(Opcode::Mapping op){
+	using namespace Opcode;
+	switch (op){
+		case BEQ: case BNE: case BLT: case BLTU: case BGE: case BGEU:
+		case JAL: case JALR:
+			return true;
+		default:
+			return false;
+	}
+}
 
-		void _print(uint8_t level) override;
+//! Which memory payload an opcode gets. Only the rv32 word and sub word accesses are marked,
+//! so the rv64 and floating point accesses record no addresses.
+enum class MemoryOpcode : uint8_t { NONE, LOAD, STORE };
+inline MemoryOpcode memory_opcode(Opcode::Mapping op){
+	using namespace Opcode;
+	switch (op){
+		case LB: case LBU: case LH: case LHU: case LW:
+			return MemoryOpcode::LOAD;
+		case SB: case SH: case SW:
+			return MemoryOpcode::STORE;
+		default:
+			return MemoryOpcode::NONE;
+	}
+}
 
-		void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
+//! The type of a new node: the payload its opcode needs, plus LEAF when it ends a window.
+//! A root node is a plain NODE whatever its opcode, so a tree of loads records no addresses at
+//! its root. Tracer::tree_for is the only place that creates one.
+inline NODE_TYPE node_type_for(Opcode::Mapping op, bool leaf){
+	uint8_t type = leaf ? (uint8_t)NODE_TYPE::LEAF : (uint8_t)NODE_TYPE::NODE;
+	if(memory_opcode(op) != MemoryOpcode::NONE){
+		type |= (uint8_t)NODE_TYPE::MEMORY;
+	}else if(is_branch_opcode(op)){
+		type |= (uint8_t)NODE_TYPE::BRANCH;
+	}
+	return (NODE_TYPE)type;
+}
+
+
+/**
+ * One instruction of an execution sequence tree: every window that reaches it ran this
+ * instruction at this position, and the node counts and describes those runs.
+ *
+ * `node_type` says what the node is. A LEAF ends a window and has no children. A MEMORY node
+ * also carries the addresses its instruction touched, a BRANCH node the outcomes it took.
+ * Those two payloads live directly after the node in one allocation, so a node that needs
+ * neither costs nothing for them; reach them with memory() and branch().
+ *
+ * Nodes live until the process ends. `create` therefore allocates raw storage and no
+ * destructor ever runs.
+ */
+class InstructionNode{
+	public:
+		InstructionNode() = default;
+
+		InstructionNode(Opcode::Mapping instruction, uint64_t parent_hash, NODE_TYPE type)
+				: instruction(instruction), node_type(type){
+					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
+		}
+
+		//! Allocate a child node for `op`, with the payload the opcode needs, in one block.
+		static InstructionNode* create(Opcode::Mapping op, uint64_t parent_hash, bool leaf);
+
+		Opcode::Mapping instruction = Opcode::UNDEF;
+		//! What this node carries. Fixed when the node is created, except that pruning turns a
+		//! node into a leaf.
+		NODE_TYPE node_type = NODE_TYPE::NODE;
+
+		uint64_t subtree_hash = 0;
+
+		//the number of times this node occurred
+		uint64_t weight = 0;
+		//weight counting only unique paths that contain this node
+		//exclude paths that already contain this node with another prefix (e.g. ADD -> SUB -> ADD -> SUB)
+		//used to calculate the coverage of a sequence (length * true_weight) 
+		//using the normal weight can lead to overestimation of coverage (sequence > 100% coverage)
+		uint64_t true_weight = 0;
+
+		//last step id this node occurred in
+		//used to lock true_weight  to prevent counting the same path multiple times
+		//update last_occurrence when true_weight is updated
+		//a node at this depth ends a window of depth+1 instructions, so the next window is
+		//disjoint from the last counted one only if its step id > last_occurrence + depth
+		uint64_t last_occurrence = 0;
+
+		uint64_t total_cycles = 0;
+
+		#ifdef trace_individual_registers
+		//! Per pc: how often this node ran at that pc, its registers, its predecessors and the
+		//! parameter values seen there. Keyed by pc, so it is also where get_pc() comes from.
+		std::map<uint64_t, RegisterSetCounter> register_sets;
+		#endif
+
+		//! One child and the opcode that leads to it. Keeping the opcode next to the pointer is
+		//! what makes the search below cheap: it reads one contiguous array instead of loading
+		//! every child node to look at its opcode, which costs a cache miss per child.
+		struct Child {
+			Opcode::Mapping op;
+			InstructionNode* node;
+		};
+
+		//! Empty on a leaf, and on an inner node no window has reached past yet.
+		std::vector<Child> children;
+
+		//entry i is set when this node reads a value written i instructions earlier in the window
+		//(1 = written by the parent). Entry 0 is never set: a node does not depend on itself.
+		//a byte per offset rather than a bit mask: the two writes on the insert path are then
+		//independent stores instead of a read-modify-write of one shared word, which measures
+		//about 1.5 percent faster over the embench set. Must be zero initialized here, because
+		//a node is created with raw storage and a plain member array would be left indeterminate.
+		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_ = {};
+		//index of other nodes this node has a anti/output dependency to
+		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
+		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_output_;
+
+		std::bitset<32> inputs_;
+		std::bitset<32> outputs_;
+
+		//how often this node ran in each phase of the program, which would say whether an
+		//instruction belongs to startup, to initialization or to the real workload.
+		//Never written: the phase boundaries are fixed step ids (O_STARTUP and the rest) and the
+		//length of the run is unknown while it is being traced, so they cannot be placed.
+		std::array<uint64_t, 4> occurrence = {0,0,0,0}; //O_STARTUP, O_BEGINNING, O_MID, O_END
+
+		// ------------------------------------------------------------- what this node is
+
+		//! Ends a window, so it has no children and the exports stop here.
+		bool is_leaf() const {
+			return (uint8_t)node_type & (uint8_t)NODE_TYPE::LEAF;
+		}
+		bool has_memory() const {
+			return (uint8_t)node_type & (uint8_t)NODE_TYPE::MEMORY;
+		}
+		bool has_branch() const {
+			return (uint8_t)node_type & (uint8_t)NODE_TYPE::BRANCH;
+		}
+		NODE_TYPE get_node_type() const {
+			return node_type;
+		}
+
+		//! The payload after this node. Only call the one has_memory()/has_branch() allows.
+		MemoryNode* memory();
+		BranchNode* branch();
+
+		//! Does this node read a value written `offset` instructions earlier in the window?
+		bool depends_true_on(size_t offset) const {
+			return dependencies_true_[offset];
+		}
+
+		//! How many earlier instructions in the window this node reads a value from.
+		uint32_t true_dependency_count() const {
+			uint32_t count = 0;
+			for (size_t i = 0; i < trace_depth; i++) {
+				if (dependencies_true_[i]) {
+					count++;
+				}
+			}
+			return count;
+		}
+
+		// ------------------------------------------------------------- recording
+
+		/**
+		 * Insert the window ending at `next_rb_index` into this tree, this node being its root.
+		 *
+		 * Works out the register and memory dependencies between the instructions of the window
+		 * and walks down the tree, creating the nodes that do not exist yet. Runs once per
+		 * executed instruction and its cost grows with the trace depth, so it is the hottest
+		 * function of the tracer.
+		 *
+		 * The ring buffer is only read, so it is passed by reference: it is copied once per
+		 * executed instruction otherwise, which is 120 bytes per tree depth step.
+		 */
+		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
+						uint32_t next_rb_index);
+		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
+						uint32_t next_rb_index, uint32_t offset);
+
+		//! Find or create the child for one step of a window and count the step on it.
+		InstructionNode* insert(const StepInfo& p);
+
+		//! Count one occurrence of this node and record what the instruction did.
+		void update_weight(const StepInfo& p);
+
+		// ------------------------------------------------------------- reading
+
+		//! The pcs this node ran at and how often, taken from register_sets.
+		std::map<uint64_t, int> get_pc() const;
+
+		//! The largest number of distinct pcs any node in this subtree ran at, which is what the
+		//! csv export compares a single node's count against.
+		uint64_t max_pc_count() const;
+
+		float get_score_bonus() const;
+		float get_score_multiplier() const;
+		double get_inv_dep_score() const;
+
+		void print();
+		void _print(uint8_t level);
+
+		/**
+		 * Write this tree as dot to standard output. `branch_threshold` omits any branch
+		 * carrying less than that share of the tree's weight, which keeps a graph of a real
+		 * program readable; pass 0 to draw every branch.
+		 */
+		void tree_to_dot(uint64_t total_instructions, float branch_threshold);
 
 		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
 									uint depth, uint id, uint64_t parent_hash, 
 									std::stringstream& dot_stream,  std::stringstream& connections_stream,
 									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold) override;
+									bool reduce_graph_output, float branch_omission_threshold);
 
-	nlohmann::ordered_json to_json() override{
-		nlohmann::ordered_json additional_fields = MemoryNode::memory_to_json();
-		nlohmann::ordered_json base_class_json = InstructionNodeR::to_json();
-		base_class_json.update(additional_fields);
-		return base_class_json;
-	}
-	std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override;
-	NODE_TYPE get_node_type() override;
-};
+		nlohmann::ordered_json to_json();
 
-class InstructionNodeMemoryLeaf : public InstructionNodeLeaf, virtual public MemoryNode{
-	public: 
-		InstructionNodeMemoryLeaf(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t pc, 
-									uint64_t memory_access, bool is_store_instruction);
+		void to_csv(const CsvParams& p);
 
+		//! Highest scoring sequence starting at this node, over every branch below it.
+		Path extend_path(const PathExtensionParams& p);
+		//! The `top_k` highest scoring sequences starting at this node.
+		std::vector<Path> extend_top_paths(const PathExtensionParams& p, size_t top_k);
+		//extend existing path beyond its original endpoint
+		//expects an existing path + first Node new path that should be extended
+		//handles possible branch instructions and the calls extend_path() 
+		std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function);
 
-		void _print(uint8_t level) override;
+		std::vector<PathNode> path_to_path_nodes(Path path, uint depth);
 
-		void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
+		//find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
+		// and another possible branch not taken, which would lead to a different sequence 
+		std::vector<BranchingPoint> find_variant_branch(Path path, uint8_t depth);
 
-		std::stringstream to_dot(const char* tree_op_name, const char* parent_name,
-									uint depth, uint id, uint64_t parent_hash, 
-									std::stringstream& dot_stream,  std::stringstream& connections_stream,
-									uint64_t tree_weight, uint64_t total_instructions, 
-									bool reduce_graph_output, float branch_omission_threshold) override;
+		//! Turn every branch below the given share of this node's weight into a leaf.
+		int prune_tree(uint64_t weight_threshold, uint8_t depth);
 
-	nlohmann::ordered_json to_json() override{
-		nlohmann::ordered_json additional_fields = MemoryNode::memory_to_json();
-		nlohmann::ordered_json base_class_json = InstructionNodeLeaf::to_json();
-		base_class_json.update(additional_fields);
-		return base_class_json;
-	}
-	std::vector<PathNode> path_to_path_nodes(Path path, uint depth) override;
-	NODE_TYPE get_node_type() override;
-};
-
-
-class InstructionNodeBranch : public InstructionNodeR, virtual public BranchNode{
-	public: 
-		InstructionNodeBranch(Opcode::Mapping instruction, uint64_t parent_hash, int64_t offset);
-
-		float get_score_multiplier() override{
-			using namespace Opcode;
-			switch (instruction){
-			case BEQ:
-			case BGE:
-			case BGEU:
-			case BNE:
-			case BLT:
-			case BLTU:
-			case JAL:
-			case JALR:
-				return 0.0;
-				break;
-			
-			default:
-				printf("[ERROR] Non branch node calling branch score function %d", instruction);
-				break;
-			}
-			
-			return 1.0;
+	private:
+		//! Where create() put the payload: directly after the node.
+		void* payload_slot() {
+			return reinterpret_cast<char*>(this) + sizeof(InstructionNode);
 		}
-	void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
-	NODE_TYPE get_node_type() override;
-	nlohmann::ordered_json to_json() override{
-		nlohmann::ordered_json additional_fields = BranchNode::branch_to_json();
-		nlohmann::ordered_json base_class_json = InstructionNodeR::to_json();
-		base_class_json.update(additional_fields);
-		return base_class_json;
-	}
+
+		std::stringstream csv_format(uint64_t parent_hash, const char* tree, const char* instruction_string,
+										uint64_t last_weight, uint64_t max_weight, uint64_t total_max_weight, uint32_t depth, 
+										double current_dep_score, double current_total_dep_score, 
+										uint32_t current_true_dep, uint32_t current_anti_dep, uint32_t current_out_dep, 
+										uint32_t total_true_dep, uint32_t total_anti_dep, uint32_t total_out_dep, 
+										uint32_t num_children, uint32_t num_current_total_inputs, uint32_t num_current_total_outputs, 
+										uint32_t num_branches, uint64_t number_of_pcs, uint64_t max_pcs);
 };
 
-class InstructionNodeBranchLeaf : public InstructionNodeLeaf, virtual public BranchNode{
-	public: 
-		InstructionNodeBranchLeaf(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t pc, 
-									int64_t offset);
+//the payloads follow the node in the same block, so both need the node's size, which is only
+//known here
+static_assert(sizeof(InstructionNode) % alignof(MemoryNode) == 0,
+		"the memory payload directly after the node must stay aligned");
+static_assert(sizeof(InstructionNode) % alignof(BranchNode) == 0,
+		"the branch payload directly after the node must stay aligned");
 
-
-		float get_score_multiplier() override{
-			using namespace Opcode;
-			switch (instruction){
-			case BEQ:
-			case BGE:
-			case BGEU:
-			case BNE:
-			case BLT:
-			case BLTU:
-			case JAL:
-			case JALR:
-				return 0.0;
-				break;
-			
-			default:
-				printf("[ERROR] Non branch leaf node calling branch score function %d", instruction);
-				break;
-			}
-			
-			return 1.0;
-		}
-	void update_weight(const StepUpdateInfo& p, uint32_t depth = 0) override;
-	NODE_TYPE get_node_type() override;
-	nlohmann::ordered_json to_json() override{
-		nlohmann::ordered_json additional_fields = BranchNode::branch_to_json();
-		nlohmann::ordered_json base_class_json = InstructionNodeLeaf::to_json();
-		base_class_json.update(additional_fields);
-		return base_class_json;
-	}
-};
+inline MemoryNode* InstructionNode::memory() {
+	return std::launder(reinterpret_cast<MemoryNode*>(payload_slot()));
+}
+inline BranchNode* InstructionNode::branch() {
+	return std::launder(reinterpret_cast<BranchNode*>(payload_slot()));
+}

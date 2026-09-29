@@ -2,10 +2,19 @@
 
 #include "trace/report.h"
 
+#include <cassert>
+
 void Tracer::configure(const TraceConfig &config) {
 	config_ = config;
 	// Clamps to the depth the VP was compiled with and warns if the request was out of range.
 	set_trace_depth(config_.depth);
+}
+
+InstructionNode &Tracer::start_tree(Opcode::Mapping op) {
+	assert(op < Opcode::NUMBER_OF_INSTRUCTIONS);
+	trees_.emplace_back(op, 0, NODE_TYPE::NODE);
+	roots_[op] = &trees_.back();
+	return trees_.back();
 }
 
 void Tracer::flush() {

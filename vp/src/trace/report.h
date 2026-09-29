@@ -21,7 +21,7 @@
  */
 struct TraceReport {
 	const TraceConfig &config;
-	std::list<InstructionNodeR> &trees;
+	std::list<InstructionNode> &trees;
 
 	//! Instructions the core retired. Every coverage figure is a share of this.
 	uint64_t retired_instructions = 0;

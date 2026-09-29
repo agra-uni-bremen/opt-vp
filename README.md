@@ -73,7 +73,7 @@ Additional arguments include
 ### :package: Trace contents
 
 Every exported tree starts with a `format_version` (current: `1.2`). The minor version is bumped
-when fields are added, the major version when existing fields change meaning. It is defined as `TRACE_FORMAT_VERSION` in `vp/src/core/common/trace.h`.
+when fields are added, the major version when existing fields change meaning. It is defined as `TRACE_FORMAT_VERSION` in `vp/src/trace/trace.h`.
 
 Every node of an exported tree carries, next to its weight and dependencies:
 

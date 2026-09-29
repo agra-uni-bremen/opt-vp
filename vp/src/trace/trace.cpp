@@ -30,6 +30,45 @@ using namespace Opcode;
 	std::array<uint64_t, INSTRUCTION_TREE_DEPTH> memory_store;
 	bool load_store_dirty = true; //fill with default during first iteration
 
+namespace {
+#if INSTRUCTION_TREE_DEPTH <= 64
+	//! Reverse the bit order of a word. Seven masked shifts and a byte swap.
+	inline uint64_t reverse_bits(uint64_t value){
+		value = ((value >> 1) & 0x5555555555555555ull) | ((value & 0x5555555555555555ull) << 1);
+		value = ((value >> 2) & 0x3333333333333333ull) | ((value & 0x3333333333333333ull) << 2);
+		value = ((value >> 4) & 0x0F0F0F0F0F0F0F0Full) | ((value & 0x0F0F0F0F0F0F0F0Full) << 4);
+		return __builtin_bswap64(value);
+	}
+#endif
+
+	/**
+	 * Turn positions in the window into distances back from position `current`.
+	 *
+	 * `positions` has bit j set for the instruction at position j of the window. A node records
+	 * how far back a dependency reaches, so it needs bit `current - j` instead. Reversing the
+	 * bit order produces every one of them at once, where walking the positions one at a time is
+	 * what made insert_rb grow with the square of the trace depth.
+	 *
+	 * Position `current` itself is dropped: an instruction does not depend on itself.
+	 */
+	inline std::bitset<INSTRUCTION_TREE_DEPTH> positions_to_offsets(
+			const std::bitset<INSTRUCTION_TREE_DEPTH>& positions, uint32_t current){
+#if INSTRUCTION_TREE_DEPTH <= 64
+		const uint64_t earlier = positions.to_ullong() & ((1ull << current) - 1);
+		return std::bitset<INSTRUCTION_TREE_DEPTH>(reverse_bits(earlier) >> (63 - current));
+#else
+		//more than one word per mask, so walk the positions
+		std::bitset<INSTRUCTION_TREE_DEPTH> offsets;
+		for (uint32_t position = 0; position < current; position++) {
+			if(positions[position]){
+				offsets.set(current - position, true);
+			}
+		}
+		return offsets;
+#endif
+	}
+}
+
 uint32_t trace_depth = INSTRUCTION_TREE_DEPTH;
 
 void set_trace_depth(uint32_t depth){
@@ -49,17 +88,12 @@ void set_trace_depth(uint32_t depth){
 	trace_depth = depth;
 }
 
-//InstructionNodeR
-InstructionNodeR::InstructionNodeR(Opcode::Mapping instruction, uint64_t parent_hash)
-			: InstructionNode(instruction, parent_hash){
-}
-
-void InstructionNodeR::insert_rb(
+void InstructionNode::insert_rb(
 				const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_steps_p, 
 				uint32_t next_rb_index){
 					insert_rb(last_executed_steps_p, next_rb_index, 0);
 				}
-void InstructionNodeR::insert_rb(
+void InstructionNode::insert_rb(
 				const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_steps_p, 
 				uint32_t next_rb_index, uint32_t offset){
 	//keep the runtime depth in a local: it can not change while a sequence is inserted, but the
@@ -170,17 +204,11 @@ void InstructionNodeR::insert_rb(
 
 		Type type = getType(current_step->last_executed_instruction);
 		if(type != Type::S){ //Store instructions don't use rd
-			for (size_t offset_idx = 0; offset_idx < i; offset_idx++)
-			{
-				// calculate anti dependencies 
-				if(register_dependencies_anti[rd][offset_idx]){
-					anti_dependencies.set(i - offset_idx, true);
-				}
-				//calculate output dependencies 
-				if(register_dependencies_output[rd][offset_idx]){
-					output_dependencies.set(i - offset_idx,true);
-				}
-			}
+			//Anti and output dependencies of this instruction: every earlier position of the
+			//window that read rd, and every earlier position that wrote it. The node stores the
+			//distance back rather than the position, which is what positions_to_offsets does.
+			anti_dependencies |= positions_to_offsets(register_dependencies_anti[rd], i);
+			output_dependencies |= positions_to_offsets(register_dependencies_output[rd], i);
 		}
 
 		//update access arrays after checking for dependencies
@@ -390,7 +418,6 @@ void InstructionNodeR::insert_rb(
 			std::cout << '\r' << std::flush;
 		// }
 		#endif
-	
 		AccessType access_type = current_step->last_memory_access_type;
 		uint64_t last_memory_access = -1;
 			if(access_type==AccessType::STORE){
@@ -399,411 +426,592 @@ void InstructionNodeR::insert_rb(
 			if (access_type==AccessType::LOAD){
 				last_memory_access = current_step->last_memory_read;
 		}			
+
+		const StepInfo step = {
+								current_step->last_executed_instruction,
+								current_step->last_executed_pc,
+								tmp_true_dependency1, tmp_true_dependency2,
+								output_dependencies,
+								anti_dependencies,
+								rs1, rs2, rd,
+								tmp_input1, tmp_input2, tmp_output,
+								i,
+								current_step->last_step_id,
+								current_step->last_cycles,
+								last_memory_access,
+								access_type,
+								current_step->last_stack_pointer,
+								current_step->last_frame_pointer,
+								current_step->last_parameter,
+								current_step->last_peripheral_name,
+								current_step->last_predecessor_pc,
+								current_step->last_branch_outcome,
+								current_step->last_branch_offset
+								};
+
 		if(i>0){//the root node already exists and is current_node
-			current_node = current_node->insert({				
-									current_step->last_executed_instruction, 
-									current_step->last_executed_pc,
-									tmp_true_dependency1, tmp_true_dependency2,
-									output_dependencies,
-									anti_dependencies,
-									rs1, rs2, rd, 
-									tmp_input1, tmp_input2, tmp_output, 
-									i, 
-									current_step->last_step_id, 
-									current_step->last_cycles, 
-									last_memory_access,
-									access_type,
-									current_step->last_stack_pointer,
-									current_step->last_frame_pointer,
-									current_step->last_parameter,
-									current_step->last_peripheral_name,
-									current_step->last_predecessor_pc,
-									current_step->last_branch_outcome,
-									current_step->last_branch_offset
-									});
-			// inserted_nodes[i] = current_node;
+			current_node = current_node->insert(step);
 		}else{
-			update_weight({-1, -1, 0, 0, //the root node does not have any dependencies
-			rs1,rs2,rd,
-			tmp_input1, tmp_input2, tmp_output,
-			current_step->last_executed_pc,
-			current_step->last_step_id, 
-			current_step->last_cycles, 
-			last_memory_access,
-			access_type,
-			current_step->last_stack_pointer,
-			current_step->last_frame_pointer,
-			current_step->last_parameter,
-			current_step->last_peripheral_name,
-			current_step->last_predecessor_pc,
-			current_step->last_branch_outcome,
-			current_step->last_branch_offset
-			}, 0); //depth is 0 as this is the root node
+			//the root node can not depend on a following instruction, and the loop above leaves
+			//the dependency fields empty for i == 0, so the same struct describes it
+			update_weight(step);
 		}
 	}
-
-	
 }
 
-InstructionNode* InstructionNodeR::insert(const StepInsertInfo& p){
-	InstructionNode* found_child = NULL;
-	for (auto child : children){
-		
-		if(child->instruction == p.op){
-			found_child = child;
+namespace {
+	//! Mnemonic of an opcode, or a marker when the value is out of range.
+	const char* opcode_name(Opcode::Mapping op){
+		return op < Opcode::mappingStr.size() ? Opcode::mappingStr[op] : "UNKWN ";
+	}
+
+	//! Colour of a node in the dot export: hue by depth, full saturation and value.
+	float dot_hue(uint depth){
+		return (float)depth/(float)trace_depth;
+	}
+}
+
+InstructionNode* InstructionNode::create(Opcode::Mapping op, uint64_t parent_hash, bool leaf){
+	const NODE_TYPE type = node_type_for(op, leaf);
+	size_t payload_size = 0;
+	if((uint8_t)type & (uint8_t)NODE_TYPE::MEMORY){
+		payload_size = sizeof(MemoryNode);
+	}else if((uint8_t)type & (uint8_t)NODE_TYPE::BRANCH){
+		payload_size = sizeof(BranchNode);
+	}
+
+	//one block for the node and its payload: recording then reaches the payload without
+	//following a pointer, and a node without one costs nothing for it
+	void* block = ::operator new(sizeof(InstructionNode) + payload_size);
+	InstructionNode* node = new (block) InstructionNode(op, parent_hash, type);
+	if(node->has_memory()){
+		new (node->payload_slot()) MemoryNode(memory_opcode(op) == MemoryOpcode::STORE);
+	}else if(node->has_branch()){
+		new (node->payload_slot()) BranchNode();
+	}
+	return node;
+}
+
+InstructionNode* InstructionNode::insert(const StepInfo& p){
+	InstructionNode* found_child = nullptr;
+	for (const Child& child : children){
+		if(child.op == p.op){
+			found_child = child.node;
 			break;
 		}
 	}
-	if(found_child==NULL){
-			switch (p.op)
-			{//TODO mark these at decoding time
-			case Mapping::LB:
-			case Mapping::LBU:
-			case Mapping::LH:
-			case Mapping::LHU:
-			case Mapping::LW:
-				if(p.depth < trace_depth-1){
-					children.push_back(new InstructionNodeMemory(p.op, subtree_hash,0,false));
-				}else{
-					//create leaf node instead
-					children.push_back(new InstructionNodeMemoryLeaf(p.op, subtree_hash, p.pc, 0, false));
-				}
-				break;
-
-			case Mapping::SB:
-			case Mapping::SH:
-			case Mapping::SW:
-				if(p.depth < trace_depth-1){
-					children.push_back(new InstructionNodeMemory(p.op, subtree_hash,0,true));
-				}else{
-					//create leaf node instead
-					children.push_back(new InstructionNodeMemoryLeaf(p.op, subtree_hash, p.pc,0,true));
-				}
-				break;
-			
-			case Mapping::BEQ:
-			case Mapping::BNE:
-			case Mapping::BLT:
-			case Mapping::BLTU:
-			case Mapping::BGE:
-			case Mapping::BGEU:
-			case Mapping::JAL:
-			case Mapping::JALR:
-				if(p.depth < trace_depth-1){
-					children.push_back(new InstructionNodeBranch(p.op, subtree_hash, 0));
-				}else{
-					//create leaf node instead
-					children.push_back(new InstructionNodeBranchLeaf(p.op, subtree_hash, p.pc, 0));
-				}
-				break;
-
-			default:
-				//printf("create RNode for instruction: %s\n", mappingStr[op]);
-				if(p.depth < trace_depth-1){
-					children.push_back(new InstructionNodeR(p.op, subtree_hash));
-				}else{
-					//create leaf node instead
-					children.push_back(new InstructionNodeLeaf(p.op, subtree_hash, p.pc));
-				}
-				break;
-			}
-		
-		found_child = children.back();
+	if(found_child==nullptr){
+		//a step at the last position of a window ends it, so its node is a leaf
+		found_child = create(p.op, subtree_hash, p.depth >= trace_depth-1);
+		children.push_back({p.op, found_child});
 	}
-	// else{
-	// 
-	// }
 
-	//to simplify node creation, we just call update_weight after creation
-	//printf("increase weight: %d", found_child->weight+1);
-	found_child->update_weight({
-								p.true_dependency1,
-								p.true_dependency2,
-								p.output_dependencies,
-								p.anti_dependencies,
-								p.rs1,
-								p.rs2,
-								p.rd,
-								p.input1,
-								p.input2,
-								p.output,
-								p.pc,
-								p.step,
-								p.cycles,
-								p.memory_address,
-								p.access_type,
-								p.stack_pointer,
-								p.frame_pointer,
-								p.parameter,
-								p.peripheral_name,
-								p.predecessor_pc,
-								p.branch_outcome,
-								p.branch_offset
-							}, p.depth);
-
+	found_child->update_weight(p);
 	return found_child;
 }
 
-void InstructionNodeR::_print(uint8_t level){
-	for (int i = 1; i < level; i++) {
-		std::cout << "\t";
+void InstructionNode::update_weight(const StepInfo& p){
+	weight++;
+	total_cycles += p.cycles;
+
+	// Update true_weight only if this window does not overlap the last counted one.
+	// p.step is the step id of the window's last instruction and the window is
+	// depth+1 instructions long, so it must start after the last counted one ended.
+	// The first occurrence is always counted: it can end at step id depth, which the
+	// comparison alone would reject.
+	if (true_weight == 0 || (last_occurrence + p.depth) < p.step) {
+		true_weight++;
+		last_occurrence = p.step;
 	}
-	const char* instruction_string = "UNKWN ";
-	if(instruction < Opcode::mappingStr.size()){
-		instruction_string = Opcode::mappingStr[instruction];
+
+	#ifdef trace_individual_registers
+	//everything that is tracked per pc shares this single lookup, it runs for every node of
+	//every executed instruction
+	auto it = register_sets.find(p.pc);
+	if(it == register_sets.end()) {
+		it = register_sets.emplace(p.pc, RegisterSetCounter{static_cast<int8_t>(p.rs1), static_cast<int8_t>(p.rs2), static_cast<int8_t>(p.rd)}).first;
+	} else {
+		it->second.count++;
+		#ifdef handle_self_modifying_code
+		//the same pc running with other registers means the instruction at that address changed
+		const RegisterSet& seen = it->second.regset;
+		if(seen.rs1 != (int8_t)p.rs1 || seen.rs2 != (int8_t)p.rs2 || seen.rd != (int8_t)p.rd){
+			printf("detected binary modification at pc %lx\n", p.pc);
+		}
+		#endif
 	}
-	std::cout << "[" << instruction_string << "(" << weight << ")]" << std::endl;
-	for (auto child : children) {
-		child->_print(level + 1);
+	#ifdef trace_predecessor_pcs
+	//which pc this occurrence was actually reached from, so later, a pc path can be proven instead of guessed
+	it->second.predecessors[p.predecessor_pc]++;
+	#endif
+	#ifdef trace_parameter
+	//record the value the ISS decoded for this instruction: shift amount, branch/jump target or,
+	//with trace_parameter_immediates, the decoded immediate. Values may be negative.
+	if (p.parameter != NO_PARAMETER
+			#ifndef trace_root_parameters
+			//tracking the root node costs one entry per pc executing this opcode with little benefit
+			&& p.depth > 0
+			#endif
+		) {
+		it->second.count_parameter(p.parameter);
+	}
+	#endif
+	#endif
+
+	if(p.true_dependency1>0){
+		dependencies_true_[p.true_dependency1] = true;
+	}else if(p.input1>=0){
+		inputs_.set(p.input1, true);
+	}
+	if(p.true_dependency2>0){
+		dependencies_true_[p.true_dependency2] = true;
+	}else if(p.input2>=0){
+		inputs_.set(p.input2, true);
+	}
+	if(p.output > 0){//ignore outputs for zero reg
+		outputs_.set(p.output, true);
+	}
+	dependencies_anti_ |= p.anti_dependencies;
+	dependencies_output_ |= p.output_dependencies;
+
+	//the payload of a load/store or of a branch. A node never has both.
+	if(has_memory()){
+		memory()->register_access(p.pc, p.memory_address, p.access_type, 0,
+								p.stack_pointer, p.frame_pointer, p.peripheral_name);
+	}else if(has_branch() && p.branch_outcome!=BranchOutcome::NONE){
+		//JALR jumps relative to rs1 rather than to the pc, so its offset must not reach the
+		//pc relative direction and offset histogram
+		branch()->register_branch(p.pc, p.branch_outcome, p.branch_offset, instruction!=Opcode::JALR);
 	}
 }
 
-std::stringstream InstructionNodeR::to_dot(const char* tree_op_name, const char* parent_name,
+uint64_t InstructionNode::max_pc_count() const {
+	uint64_t largest = get_pc().size();
+	for (const Child& child : children) {
+		largest = std::max(largest, child.node->max_pc_count());
+	}
+	return largest;
+}
+
+std::map<uint64_t, int> InstructionNode::get_pc() const {
+	std::map<uint64_t, int> pcs;
+	#if defined(trace_pcs) && defined(trace_individual_registers)
+	for (const auto& entry : register_sets) {
+		pcs.emplace(entry.first, entry.second.count);
+	}
+	#endif
+	return pcs;
+}
+
+float InstructionNode::get_score_bonus() const {
+	if(is_branch_opcode(instruction)){
+		//a branch or a jump inside a sequence makes the sequence worth nothing, see
+		//get_score_multiplier. At the root of its own tree it is only penalised.
+		return -1.0;
+	}
+#ifndef dependency_score
+	return 0.0;
+#else
+	//reward an instruction that depends on nothing in the window, penalise a chain
+	uint64_t dependencies_count = true_dependency_count();
+	if(dependencies_count>0){
+		return -(float)dependencies_count/10.0;
+	}
+	return 2.0;
+#endif
+}
+
+float InstructionNode::get_score_multiplier() const {
+	if(has_branch()){
+		//zero, so no sequence that contains a branch or a jump can win. The same opcode at the
+		//root of its tree has no branch payload and keeps a multiplier of one.
+		return 0.0;
+	}
+	return 1.0;
+}
+
+double InstructionNode::get_inv_dep_score() const {
+	using namespace Opcode;
+	switch (instruction)
+	{
+	case BEQ:
+	case BNE:
+	case BLT:
+	case BLTU:
+	case BGE:
+	case BGEU:
+		return 0.0;
+	default:
+		break;
+	}
+
+	//closer dependencies weigh more: an instruction reading the value its parent wrote can not
+	//be reordered, one reading a value from ten instructions back nearly always can
+	double result = 0.0;
+	for (size_t i = 1; i < trace_depth; i++)
+	{
+		if(depends_true_on(i)){
+			result += 1/(double)i; //i should never be 0 as a node does not depend on itself
+		}
+		if(dependencies_output_[i]){
+			result += 1/(double)i;
+		}
+		if(dependencies_anti_[i]){
+			result += 1/(double)i;
+		}
+	}
+	return result;
+}
+
+void InstructionNode::print(){
+	std::cout << "--------\n";
+	std::cout << "](" << opcode_name(instruction) << ")[\n";
+	std::cout << "--" << weight << "--\n";
+	_print(1);
+}
+
+void InstructionNode::_print(uint8_t level){
+	for (int i = 1; i < level; i++) {
+		std::cout << "\t";
+	}
+	std::cout << "[" << opcode_name(instruction) << "(" << weight << ")]" << std::endl;
+	for (const Child& child : children) {
+		child.node->_print(level + 1);
+	}
+}
+
+void InstructionNode::tree_to_dot(uint64_t total_instructions, float branch_threshold){
+	std::stringstream dot_stream; 
+	std::stringstream connections_stream; 
+
+	//the digraph header is written by the dot exporter, which knows the file
+	dot_stream << "//Nodes" << std::endl;
+	connections_stream << "//Connections" << std::endl;
+
+	to_dot(opcode_name(instruction), "", 0, 0, 0, 
+		dot_stream, connections_stream,
+		weight, total_instructions, 
+		branch_threshold > 0.0f, branch_threshold);
+
+	dot_stream << connections_stream.str();
+
+	std::cout << dot_stream.str() << std::endl;
+}
+
+std::stringstream InstructionNode::to_dot(const char* tree_op_name, const char* parent_name,
 							uint depth, uint id, uint64_t parent_hash, 
 							std::stringstream& dot_stream,  std::stringstream& connections_stream,
 							uint64_t tree_weight, uint64_t total_instructions, 
 							bool reduce_graph_output, float branch_omission_threshold){
-	const char* instruction_string = "UNKWN ";
-	if(instruction < Opcode::mappingStr.size()){
-		instruction_string = Opcode::mappingStr[instruction];
-	}
-	const char* label = instruction_string;
+	const char* label = opcode_name(instruction);
 	std::stringstream name;
 
-	float hue = dot_hue(depth);
-	float saturation = dot_sat(depth, 0); 
-	float value = dot_val(depth, 0);
-	
-	#if 0
-	//record type
-	// if(depth>0){
-	// 	name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
-		
-	// 	connections_stream << parent_name << " -> " << name.str();
-	// 	connections_stream << "[label=\"" << weight << "\"]" << std::endl;
+	if(depth==0){
+		//the root is drawn as a record and carries its share of the whole program rather than
+		//of its tree, which is what makes trees comparable to each other
+		name << label;
+		float per_weight = (float)weight/(float)total_instructions;
+		std::stringstream top_label;
+		top_label << "|{" << label << " | " << (float)(((int)(per_weight * 1000.0)) % 1000) / 10.0 
+				<< " | " << weight << "/" << total_instructions << "}|";
+		uint16_t color_index = std::min(11.0, (per_weight*2.0) * 10 + 0.1 + 1); //TODO is half of all instructions a good max?
+		dot_stream << name.str()
+				<< "[label=\"" << top_label.str() << "\", shape = record, color=" << color_index 
+				<< ", colorscheme=spectral11" << "]" << std::endl;
+	}else{
+		//a leaf above the last level of the tree only exists because the tree was pruned
+		const bool pruned = is_leaf() && depth < trace_depth-1;
+		if(pruned){
+			name << "pruned_";
+		}
+		name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << label;
 
-	// 	dot_stream << name.str(); 
-	// 	uint16_t color_index = ((float)weight/(float)tree_weight) * 8 + 0.1 + 1; //9 colors (1-9) TODO configure rounding
-	// 	dot_stream << "[label=\"" << "{" << label << " | " << subtree_hash << "}" << "\", color=" << color_index << "]" << std::endl;
-	// }else{
-	// 	name << instruction_string;
+		const float per_weight = (float)weight/(float)tree_weight;
+		const uint16_t color_index = pruned ? 1 : (uint16_t)(per_weight * 8 + 0.1 + 1); //9 colors (1-9)
 
-	// 	dot_stream << name.str(); 
-	// 	std::stringstream top_label;
-	// 	float per_weight = (float)weight/(float)total_instructions;
-	// 	top_label << "|{" << label << " | " << (float)(((int)(per_weight * 1000.0)) % 1000) / 10.0 << " | " << weight << "/" << total_instructions << "}|";
-	// 	uint16_t color_index = std::min(11.0, (per_weight*2.0) * 10 + 0.1 + 1); //TODO is half of all instructions a good max?
-	// 	dot_stream << "[label=\"" << top_label.str() << "\", shape = record, color=" << color_index << ", colorscheme=spectral11" << "]" << std::endl;
-	// }
-	#endif
-	//HTML type
-	if(depth>0){
-		name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
-		
-		dot_stream << name.str(); 
-		float per_weight = (float)weight/(float)tree_weight;
-		uint16_t color_index = per_weight * 8 + 0.1 + 1; //9 colors (1-9) TODO configure rounding
-		
-		dot_stream 
-		<< "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-		<< "<TR><TD><FONT COLOR=\"" << hue << " " << saturation << " " << value << "\">" 
-		<< label 
-		<< "</FONT></TD></TR>"
+		dot_stream << name.str() 
+			<< "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
+			<< "<TR><TD><FONT COLOR=\"" << dot_hue(depth) << " 1 1\">" << label << "</FONT></TD></TR>";
 
-		<< "<TR><TD>";
-		uint dependencies_count = 0;
-		for (size_t i = 0; i < trace_depth; i++)
+		//true dependencies, coloured by the depth of the instruction the value comes from
+		dot_stream << "<TR><TD>";
+		for (size_t i = 1; i < trace_depth; i++)
 		{
 			if(depends_true_on(i)){
-			// if(i>depth){
-			// 	printf("error\n");
-			// }
-				dependencies_count++;
-				dot_stream << "<FONT COLOR=\"" 
-				<< dot_hue(depth-i) << " " << dot_sat(depth-i,0) << " " << dot_val(depth,0) << "\">" 
-				<< i << " \n" << "</FONT>";
+				dot_stream << "<FONT COLOR=\"" << dot_hue(depth-i) << " 1 1\">" 
+						<< i << " \n" << "</FONT>";
 			}
-			//TODO needs parent link
-			//   splines=line;
-	 		// e-> a[constraint=false, style="dashed" color="0.6 0.6 1.000"]
 		}
-		//printf("num dependencies_true_: %d\n", dependencies_count);
-		dot_stream << "</TD></TR>";
-		
-		//inlcude used registers
-		dot_stream << "<TR><TD>";
-
-		/*uint register_count = 0;
-		for (size_t i = 0; i < 32; i++) //Number of registers
-		{
-			if([i]){
-			// if(i>depth){
-			// 	printf("error\n");
-			// }
-				dependencies_count++;
-				dot_stream << "<FONT COLOR=\"" 
-				<< dot_hue(depth-i) << " " << dot_sat(depth-i,0) << " " << dot_val(depth,0) << "\">" 
-				<< i << " \n" << "</FONT>";
-			}
-			//TODO needs parent link
-			//   splines=line;
-	 		// e-> a[constraint=false, style="dashed" color="0.6 0.6 1.000"]
-		}
-		//printf("num dependencies_true_: %d\n", dependencies_count);
-		*/
-
-
 		dot_stream << "</TD></TR>";
 
-		dot_stream 
-		<< "<TR><TD><FONT COLOR=\"0.6 0.6 1.000\" POINT-SIZE=\"10\">" 
-		<< std::hex << subtree_hash << std::dec 
-		<< "</FONT></TD></TR></TABLE>" 
-		<< ">, color=" 
-		<< color_index << "]" 
-		<< std::endl;
+		dot_stream << "<TR><TD><FONT COLOR=\"0.6 0.6 1.000\" POINT-SIZE=\"10\">" 
+				<< std::hex << subtree_hash << std::dec << "</FONT></TD></TR>";
+
+		if(has_memory()){
+			dot_stream << "<TR><TD><FONT COLOR=\"0.2 0.8 1.000\" POINT-SIZE=\"10\">[";
+			for (auto &&access : memory()->memory_accesses)
+			{
+				dot_stream << std::hex << access.first << ": {";
+				for(auto &&pair : access.second){
+					dot_stream << "(" << std::hex << (pair.first & 0xFFFF) << " - " << std::hex << (int)pair.second << "), ";
+				}
+				dot_stream << std::hex << access.first << "}" << std::dec;
+			}
+			dot_stream << std::dec << "]</FONT></TD></TR>";
+		}
+
+		if(is_leaf()){
+			dot_stream << "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
+			for (auto const& pc : get_pc())
+			{
+				dot_stream << pc.first << ":" << pc.second << " "; 
+			}
+			dot_stream << std::dec << "</FONT></TD></TR>";
+		}
+
+		if(pruned){
+			dot_stream << "<TR><TD><FONT COLOR=\"0.8 0.0 0.1\" POINT-SIZE=\"14\"> pruned </FONT></TD></TR>";
+		}
+
+		dot_stream << "</TABLE>>, color=" << color_index << "]" << std::endl;
 
 		connections_stream << parent_name << " -> " << name.str();
 		connections_stream << "[label=\"" << weight << "\" decorate=true";
 
-		if(reduce_graph_output && per_weight<branch_omission_threshold){
-			int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-			//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
+		if(!pruned && reduce_graph_output && per_weight<branch_omission_threshold){
+			//draw the edge, but not the subtree behind it
+			int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0)));
 			connections_stream << " style=\"dashed\" color=\"gray" << shade
-			<<  "\" fontcolor=\"gray" << shade 
-			<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
-			//skip adding children to graph
+					<< "\" fontcolor=\"gray" << shade << "\"]" << std::endl;
 			return name; 
-		}else{
-			connections_stream << "]" << std::endl;
 		}
-
-	}else{
-		name << instruction_string;
-
-		dot_stream << name.str(); 
-		std::stringstream top_label;
-		float per_weight = (float)weight/(float)total_instructions;
-		top_label << "|{" << label << " | " << (float)(((int)(per_weight * 1000.0)) % 1000) / 10.0 << " | " << weight << "/" << total_instructions << "}|";
-		uint16_t color_index = std::min(11.0, (per_weight*2.0) * 10 + 0.1 + 1); //TODO is half of all instructions a good max?
-		dot_stream << "[label=\"" << top_label.str() << "\", shape = record, color=" << color_index << ", colorscheme=spectral11" << "]" << std::endl;
+		connections_stream << "]" << std::endl;
 	}
 
-	//parent_hash = (parent_hash << 6) + instruction; //shifting by 6 should shift value outside opcode range 
-	int child_index = 0;
-	for (auto child : children) {
-		child->to_dot(tree_op_name, name.str().c_str(), 
+	uint child_index = 0;
+	for (const Child& child : children) {
+		child.node->to_dot(tree_op_name, name.str().c_str(), 
 					depth + 1, child_index, subtree_hash, 
 					dot_stream, connections_stream, 
-					tree_weight,total_instructions,
+					tree_weight, total_instructions,
 					reduce_graph_output, branch_omission_threshold);
-		child_index ++;
+		child_index++;
 	}
 
 	return name;
 }
 
-void InstructionNodeR::to_csv(const CsvParams& p) {
+nlohmann::ordered_json InstructionNode::to_json(){
+	nlohmann::ordered_json jsonNode;
+	jsonNode["instruction"] = Opcode::mappingStr[instruction];
+	jsonNode["type"] = get_node_type();
+	jsonNode["weight"] = weight;
+	jsonNode["true_weight"] = true_weight;
+	jsonNode["subtree_hash"] = subtree_hash;
+
+	#ifdef trace_individual_registers
+		nlohmann::json jsonRegisterSets = nlohmann::json::object();
+		for (const auto& entry : register_sets) {
+			uint64_t key = entry.first;
+			const RegisterSetCounter& rsc = entry.second;
+			nlohmann::json jsonEntry = { {"count", rsc.count}, {"rs1", rsc.regset.rs1}, {"rs2", rsc.regset.rs2}, {"rd", rsc.regset.rd} };
+			#ifdef trace_predecessor_pcs
+			if (!rsc.predecessors.empty()) {
+				nlohmann::json jsonPredecessors = nlohmann::json::object();
+				for (const auto& predecessor : rsc.predecessors) {
+					jsonPredecessors[std::to_string(predecessor.first)] = predecessor.second;
+				}
+				jsonEntry["predecessors"] = jsonPredecessors;
+			}
+			#endif
+			jsonRegisterSets[std::to_string(key)] = jsonEntry;
+		}
+		jsonNode["register_sets"] = jsonRegisterSets;
+	#endif 
+
+	//dependencies as offsets back along the path, 1 being the parent
+	std::vector<int> true_dependencies;
+	std::set<int8_t> anti_dependencies;
+	std::set<int8_t> output_dependencies;
+
+	for (size_t i = 1; i < trace_depth; i++){
+			if(depends_true_on(i)){
+				true_dependencies.push_back(i);
+			}
+			if (dependencies_anti_[i]) {
+				anti_dependencies.insert(i);
+			}
+			if (dependencies_output_[i]) {
+				output_dependencies.insert(i);
+			}
+	}
+
+	std::set<int8_t> inputs;
+	std::set<int8_t> outputs;
+
+	for (size_t i = 0; i < 32; i++){
+			if(inputs_[i]){
+				inputs.insert(i);
+			}
+			if (outputs_[i]) {
+				outputs.insert(i);
+			}
+	}
+
+	nlohmann::json jsonDependencies1 = true_dependencies;
+	jsonNode["dependencies_true"] = jsonDependencies1;
+	nlohmann::json jsonDependencies2 = anti_dependencies;
+	jsonNode["dependencies_anti"] = jsonDependencies2;
+	nlohmann::json jsonDependencies3 = output_dependencies;
+	jsonNode["dependencies_output"] = jsonDependencies3;
+
+	jsonNode["inputs"] = inputs;
+	jsonNode["outputs"] = outputs;
+
+	jsonNode["occurrence"] = occurrence;
+
+	#ifdef trace_parameter
+	//[[pc, [[value, count], ...]], ...]
+	nlohmann::json jsonParameters = nlohmann::json::array();
+	for (const auto& entry : register_sets) {
+		if(entry.second.parameters.empty()){
+			continue;
+		}
+		nlohmann::json jsonValues = nlohmann::json::array();
+		for (const ParameterCounter& value : entry.second.parameters) {
+			jsonValues.push_back({value.value, value.count});
+		}
+		jsonParameters.push_back({entry.first, jsonValues});
+	}
+	jsonNode["parameters"] = jsonParameters;
+	#endif
+
+	if(is_leaf()){
+		//a leaf is written with its keys sorted, which is what the unordered json type does
+		nlohmann::json sorted = jsonNode;
+		sorted["PCs"] = get_pc();
+		nlohmann::ordered_json leaf_json = sorted;
+		if(has_memory()){
+			leaf_json.update(memory()->memory_to_json());
+		}else if(has_branch()){
+			leaf_json.update(branch()->branch_to_json());
+		}
+		return leaf_json;
+	}
+
+	nlohmann::ordered_json jsonChildren = nlohmann::ordered_json::array(); 
+	for (const Child& child : children)
+	{
+		jsonChildren.push_back(child.node->to_json());
+	}
+	jsonNode["children"] = jsonChildren;
+
+	if(has_memory()){
+		jsonNode.update(memory()->memory_to_json());
+	}else if(has_branch()){
+		jsonNode.update(branch()->branch_to_json());
+	}
+
+	return jsonNode;
+}
+
+//might be easier to use a struct but this way its harder to miss a parameter
+std::stringstream InstructionNode::csv_format(uint64_t parent_hash, const char* tree, const char* instruction_string,
+								uint64_t last_weight, uint64_t max_weight, uint64_t total_max_weight, uint32_t depth, 
+								double current_dep_score, double current_total_dep_score, 
+								uint32_t current_true_dep, uint32_t current_anti_dep, uint32_t current_out_dep, 
+								uint32_t total_true_dep, uint32_t total_anti_dep, uint32_t total_out_dep, 
+								uint32_t num_children, uint32_t num_current_total_inputs, uint32_t num_current_total_outputs, 
+								uint32_t num_branches, uint64_t number_of_pcs, uint64_t max_pcs){
 	std::stringstream csv_stream; 
-	std::map<InstructionType, uint32_t> _instruction_types = 
-												p.instruction_types;
+	csv_stream << subtree_hash << ";" //ID
+			<< parent_hash << ";" //parent subtree hash
+			<< tree << ";" //Tree
+			<< instruction_string << ";" //This instruction 
+			<< weight << ";"
+			<< true_weight << ";"
+			<< last_weight - weight << ";"
+			<< max_weight - weight << ";"
+			<< total_max_weight - weight << ";"
+			<< depth << ";" //Length
+			<< trace_depth - depth << ";" //Length
+			<< -1 << ";" //cycles used by sequence for one iteration
+			<< current_dep_score << ";"
+			<< current_total_dep_score << ";"
+			<< current_true_dep << ";"
+			<< current_anti_dep << ";"
+			<< current_out_dep << ";"
+			<< total_true_dep << ";" 
+			<< total_anti_dep << ";" 
+			<< total_out_dep << ";" 
+			<< num_children << ";" //children
+			<< Opcode::NUMBER_OF_INSTRUCTIONS - num_children << ";"
+			<< inputs_.count() << ";"
+			<< num_current_total_inputs << ";"
+			<< outputs_.count() << ";"
+			<< num_current_total_outputs << ";"
+			<< -1 << ";" //TODO Instruction Types
+			<< num_branches << ";" //Number of Branches
+			<< occurrence[0] << ";"
+			<< occurrence[1] << ";"
+			<< occurrence[2] << ";"
+			<< occurrence[3] << ";"
+			<< number_of_pcs << ";"
+			<< max_pcs - number_of_pcs << ";";
+
+	return csv_stream;
+}
+
+void InstructionNode::to_csv(const CsvParams& p) {
+	std::map<InstructionType, uint32_t> _instruction_types = p.instruction_types;
 
 	double current_dep_score = get_inv_dep_score();
-    double current_total_dep_score = p.last_dep_score + current_dep_score;
+	double current_total_dep_score = p.last_dep_score + current_dep_score;
 
-    uint32_t current_true_dep = count_true_dependencies();
-    uint32_t current_anti_dep = dependencies_anti_.count();
-    uint32_t current_out_dep = dependencies_output_.count();
+	uint32_t current_true_dep = true_dependency_count();
+	uint32_t current_anti_dep = dependencies_anti_.count();
+	uint32_t current_out_dep = dependencies_output_.count();
 
-    uint32_t total_true_dep = p.true_dep +  current_true_dep;
-    uint32_t total_anti_dep = p.anti_dep + current_anti_dep;
-    uint32_t total_out_dep = p.out_dep + current_out_dep;
+	uint32_t total_true_dep = p.true_dep +  current_true_dep;
+	uint32_t total_anti_dep = p.anti_dep + current_anti_dep;
+	uint32_t total_out_dep = p.out_dep + current_out_dep;
 
-    std::bitset<32> current_total_inputs = p.total_inputs | inputs_;
-    std::bitset<32> current_total_outputs = p.total_outputs | outputs_;
+	std::bitset<32> current_total_inputs = p.total_inputs | inputs_;
+	std::bitset<32> current_total_outputs = p.total_outputs | outputs_;
 
 	uint64_t number_of_pcs = get_pc().size();
 	_instruction_types[getInstructionType(instruction)]++;
 
-	const char* instruction_string = "UNKWN ";
-	if(instruction < Opcode::mappingStr.size()){
-		instruction_string = Opcode::mappingStr[instruction];
-	}
+	std::stringstream csv_stream = csv_format(p.parent_hash, p.tree, opcode_name(instruction),
+							p.last_weight, p.max_weight, p.total_max_weight, 
+							p.depth, current_dep_score, current_total_dep_score, 
+							current_true_dep, current_anti_dep, current_out_dep, 
+							total_true_dep, total_anti_dep, total_out_dep, 
+							children.size(), current_total_inputs.count(), 
+							current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
+							number_of_pcs, p.max_pcs);
+	std::cout << csv_stream.str() << std::endl;
 
-	// uint64_t cycles = 0;
-	// switch (instruction)
-	// {
-	// case Opcode::LB:
-	// case Opcode::LBU:
-	// case Opcode::LH:
-	// case Opcode::LHU:
-	// case Opcode::LW:
-	// case Opcode::SB:
-	// case Opcode::SH:
-	// case Opcode::SW:
-	// 	cycles +=4;
-	// 	break;
-	// case Opcode::MUL:
-	// case Opcode::MULH:
-	// case Opcode::MULHU:
-	// case Opcode::MULHSU:
-	// case Opcode::DIV:
-	// case Opcode::DIVU:
-	// case Opcode::REM:
-	// case Opcode::REMU:
-	// 	cycles +=8;
-	// 	break;
-	// default:
-	// 	cycles +=1;
-	// 	break;
-	// }
-
-	csv_stream = csv_format(p.parent_hash, p.tree, instruction_string, p.last_weight, p.max_weight, p.total_max_weight, 
-								p.depth, current_dep_score, current_total_dep_score, 
-								current_true_dep, current_anti_dep, current_out_dep, 
-								total_true_dep, total_anti_dep,total_out_dep, 
-								children.size(), current_total_inputs.count(), 
-								current_total_outputs.count(), _instruction_types[InstructionType::Branch], 
-								number_of_pcs, p.max_pcs);
-	std::cout << csv_stream.str() <<std::endl;
-
-	for (auto &&child : children)
+	for (const Child& child : children)
 	{
-		// csv_stream << std::endl;
-		child->to_csv({
-            p.total_instructions,
-            p.tree,
-            p.depth + 1,
-            current_dep_score,
-            total_true_dep,
-            total_anti_dep,
-            total_out_dep,
-            current_total_inputs,
+		child.node->to_csv({
+			p.total_instructions,
+			p.tree,
+			p.depth + 1,
+			current_dep_score,
+			total_true_dep,
+			total_anti_dep,
+			total_out_dep,
+			current_total_inputs,
 			current_total_outputs,
-            _instruction_types,
-            subtree_hash,
-            p.max_weight,
+			_instruction_types,
+			subtree_hash,
+			p.max_weight,
 			weight,//last weight
-            p.total_max_weight,
-            p.max_pcs
-        });
+			p.total_max_weight,
+			p.max_pcs
+		});
 	}
-
-}
-
-nlohmann::ordered_json InstructionNodeR::to_json(){
-	nlohmann::ordered_json additional_fields;
-
-	nlohmann::ordered_json jsonChildren = nlohmann::ordered_json::array(); 
-	for (auto &&child : children)
-	{
-		jsonChildren.push_back(child->to_json());
-	}
-	additional_fields["children"] = jsonChildren;
-
-	nlohmann::ordered_json base_class_json = InstructionNode::to_json();
-	base_class_json.update(additional_fields);
-	return base_class_json;
 }
 
 namespace {
@@ -846,15 +1054,15 @@ namespace {
 	}
 }
 
-std::vector<Path> InstructionNodeR::extend_top_paths(const PathExtensionParams& p, size_t top_k){
+std::vector<Path> InstructionNode::extend_top_paths(const PathExtensionParams& p, size_t top_k){
 	if (top_k == 0)
 		return {};
 
 	std::vector<Path> candidates;
 	candidates.push_back(build_node_path(*this, p));
 
-	for (InstructionNode* child : children) {
-		auto child_candidates = child->extend_top_paths({p.length + 1,
+	for (const Child& child : children) {
+		auto child_candidates = child.node->extend_top_paths({p.length + 1,
 				p.score_bonus + get_score_bonus(),
 				p.score_multiplier * get_score_multiplier(),
 				p.tree_id,
@@ -873,7 +1081,7 @@ std::vector<Path> InstructionNodeR::extend_top_paths(const PathExtensionParams& 
 }
 
 //called recursively for children
-Path InstructionNodeR::extend_path(const PathExtensionParams& p){
+Path InstructionNode::extend_path(const PathExtensionParams& p){
 	
 	//score multiplier for this singular node
 	//we can't simply pass its weight * mult as score as the weight changes when extending the path  
@@ -899,31 +1107,16 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 
 	max_path.end_of_sequence = this;
 
-	//printf("tree %d depth %d\r", tree_id, length);
-
-	//handle children
-
-	// if(typeid(*this)==typeid(InstructionNodeBranch)){ //override instead
-	// 	return max_path;
-	// }
-
 	Path max_child_path;
 	Path child_path;
-	int child_index = 0;
-	for (InstructionNode* child : children) {
-
-		// if(typeid(*child)==typeid(InstructionNodeBranch)){
-		// //printf("Found Branch in child\n\n\n");
-		// //return max_path;
-		
-		// }
-		child_path = child->extend_path({p.length+1, 
+	for (const Child& child : children) {
+		child_path = child.node->extend_path({p.length+1, 
 				max_path.score_bonus, max_path.score_multiplier, p.tree_id, p.force_extension_depth, 
 				p.force_instruction, p.score_function});
 		if(max_child_path.length==0){ //should not happen with force_extension
 			max_child_path = child_path;
 		}else{
-			if(static_cast<uint32_t>(p.force_extension_depth+1) == p.length && p.force_instruction == child->instruction){
+			if(static_cast<uint32_t>(p.force_extension_depth+1) == p.length && p.force_instruction == child.op){
 				//force_extension is -1 if not forcing extension
 				//if instruction == child->instruction
 				//set child_path as new max_child without checking score and break
@@ -934,7 +1127,6 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 				max_child_path = child_path;
 			}
 		}
-		child_index++;
 	}
 
 	if (max_child_path.length>0)
@@ -957,15 +1149,20 @@ Path InstructionNodeR::extend_path(const PathExtensionParams& p){
 	return max_path;
 }
 
-std::vector<Path> InstructionNodeR::force_path_extension(const Path p, std::function <float(ScoreParams)> score_function){
+std::vector<Path> InstructionNode::force_path_extension(const Path p, std::function <float(ScoreParams)> score_function){
 	std::vector<Path> extended_sequences;
+	if(is_leaf()){
+		printf("Warning: the sequence ends at the maximum tree depth and can not be extended\n"
+				"Consider increasing the maximum tree depth\n");
+		return extended_sequences;
+	}
+
 	//handle sequences ending in a branch/jump
 	//force extend the path to the branch/jump if the node is the only child
 	Path path_origin = p;
-	if(children.size() == 1 && (getInstructionType(children.front()->instruction) == InstructionType::Branch ||  getInstructionType(children.front()->instruction) == InstructionType::Jump)){
-		InstructionNode* child = children.front();
-		InstructionNodeBranch* branch_child = dynamic_cast<InstructionNodeBranch*>(child); //check whether we already reached the end of the tree
-		if(branch_child == NULL){
+	if(children.size() == 1 && (getInstructionType(children.front().op) == InstructionType::Branch ||  getInstructionType(children.front().op) == InstructionType::Jump)){
+		InstructionNode* branch_child = children.front().node;
+		if(branch_child->is_leaf()){ //we already reached the end of the tree
 			printf("Warning: only child of sequence is a branch, but no further nodes to extend the sequence exist\n");
 			return extended_sequences;
 		}
@@ -973,254 +1170,139 @@ std::vector<Path> InstructionNodeR::force_path_extension(const Path p, std::func
 		assert(path_origin.minimum_weight == branch_child->weight);
 
 		float score_bonus_of_next_node = branch_child->get_score_bonus();
-		// float score_multiplier_of_next_node = branch_child->get_score_multiplier();
 
 		path_origin.score_bonus += score_bonus_of_next_node;
-		// path_origin.score_multiplier += score_multiplier_of_next_node; 
 		path_origin.inverse_dependency_score = branch_child->get_inv_dep_score();//TODO check if this is correct
 		
 		//(forward branch and backward branch out of scope have score multiplier = 0)
 		path_origin.opcodes.push_back(branch_child->instruction);
 		path_origin.path_hashes.push_back(branch_child->subtree_hash);
 
-		//TODO
-		// extended_sequences.push_back(path_origin);
-		return children.front()->force_path_extension(path_origin, score_function);
+		return branch_child->force_path_extension(path_origin, score_function);
 	}
-	for (auto &&child : children)
+	for (const Child& child : children)
 	{
 		Path max_path = p;
-		Path child_path = child->extend_path({p.length+1, 
+		Path child_path = child.node->extend_path({p.length+1, 
 				p.score_bonus, p.score_multiplier, -1, -1, Opcode::Mapping::UNDEF, score_function});
-		// if (child_path.length>0)
-		// {
-			max_path.length = child_path.length;
-			max_path.minimum_weight = child_path.minimum_weight;
-			max_path.opcodes.insert(max_path.opcodes.end(), 
-							child_path.opcodes.begin(), 
-							child_path.opcodes.end());
-			max_path.path_hashes.insert(max_path.path_hashes.end(), 
-				child_path.path_hashes.begin(), 
-				child_path.path_hashes.end());
-			max_path.inverse_dependency_score += child_path.inverse_dependency_score;
-			max_path.end_of_sequence = child_path.end_of_sequence;
-		// }
-
+		max_path.length = child_path.length;
+		max_path.minimum_weight = child_path.minimum_weight;
+		max_path.opcodes.insert(max_path.opcodes.end(), 
+						child_path.opcodes.begin(), 
+						child_path.opcodes.end());
+		max_path.path_hashes.insert(max_path.path_hashes.end(), 
+			child_path.path_hashes.begin(), 
+			child_path.path_hashes.end());
+		max_path.inverse_dependency_score += child_path.inverse_dependency_score;
+		max_path.end_of_sequence = child_path.end_of_sequence;
 
 		extended_sequences.push_back(max_path);
 	}
 	return extended_sequences;
-	
 }
 
-int InstructionNodeR::prune_tree(uint64_t weight_threshold, uint8_t depth){
-	uint8_t child_idx = 0;
+std::vector<PathNode> InstructionNode::path_to_path_nodes(Path path, uint depth){
+	std::vector<PathNode> nodes; 
+
+	std::set<int8_t> indices_anti;
+	std::set<int8_t> indices_out;
+	for (size_t i = 0; i < trace_depth; i++) {
+		if (dependencies_anti_[i]) {
+			indices_anti.insert(i);
+		}
+		if (dependencies_output_[i]) {
+			indices_out.insert(i);
+		}
+	}
+
+	PathNode node(instruction, weight, get_score_bonus(), get_score_multiplier(), get_inv_dep_score(), 
+					get_pc(), dependencies_true_, indices_out, indices_anti);
+	if(has_memory()){
+		node.extra_fields = memory()->memory_to_json();
+	}
+	nodes.push_back(node);
+
+	if(is_leaf() || (depth+1)>=path.length){
+		return nodes;
+	}
+
+	InstructionNode* found_child = nullptr;
+	for (const Child& child : children){
+		if(child.op == path.opcodes[depth+1]){
+			found_child = child.node;
+			break;
+		}
+	}
+	if(found_child==nullptr){
+		printf("[ERROR] no children in tree that match discovered path"); //should not be possible
+		return nodes;
+	}
+	std::vector<PathNode> child_nodes = found_child->path_to_path_nodes(path, depth+1); 
+	nodes.insert(nodes.end(), child_nodes.begin(), child_nodes.end());
+	return nodes;
+}
+
+//find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
+// and another possible branch not taken, which would lead to a different sequence 
+std::vector<BranchingPoint> InstructionNode::find_variant_branch(Path path, uint8_t depth){
+	//find branching point
+	//then create new Path up to this point and extend_path()
+
+	std::vector<BranchingPoint> branching_points; 
+
+	if(is_leaf() || (uint32_t)(depth+1)>=path.length){
+		return branching_points;
+	}
+
+	InstructionNode* found_child = nullptr;
+	int64_t current_max_weight = -1;
+	double current_max_ratio = -1.0;
+	Opcode::Mapping current_instruction = Opcode::UNDEF;
+	for (const Child& child : children){
+		if(child.op == path.opcodes[depth+1]){
+			found_child = child.node; //if child is on previous best path, continue variant search with that node
+		}else{
+			double current_ratio = (double)child.node->weight / (double)weight; //otherwise save possible branching point
+			if(current_ratio>current_max_ratio){
+				current_max_weight = child.node->weight;
+				current_max_ratio = current_ratio;
+				current_instruction = child.op;
+			}
+		}
+	}
+
+	if(current_max_weight>0){
+		BranchingPoint bp = {depth, current_instruction, current_max_weight, current_max_ratio, this}; 
+		branching_points.push_back(bp);
+	}
+
+	if(found_child==nullptr){
+		printf("[ERROR] no children in tree that match discovered path"); //should not be possible
+		return branching_points;
+	}
+	std::vector<BranchingPoint> child_branching_points = found_child->find_variant_branch(path, depth+1); 
+	branching_points.insert(branching_points.end(), child_branching_points.begin(), child_branching_points.end());
+	return branching_points;
+}
+
+int InstructionNode::prune_tree(uint64_t weight_threshold, uint8_t depth){
 	bool pruned = false;
-	for (InstructionNode*& child : children) {//iterate over the actual pointers
-		if (child->weight < weight_threshold)
+	for (const Child& child : children) {
+		if (child.node->weight < weight_threshold && !child.node->is_leaf())
 		{
 			if(!pruned){
 				printf("\t\tpruned branch at depth: %d\n", depth);
 				pruned = true;
-
 			}
-			if(dynamic_cast<InstructionNodeLeaf*>(child)){
-				return 1; //branch should be pruned, but child is leaf/end of branch anyway
-			}
-			//might be better to use copy constructors
-			else if(InstructionNodeMemory* der_child = dynamic_cast<InstructionNodeMemory*>(child)){
-				InstructionNodeMemoryLeaf* new_child = 
-					new InstructionNodeMemoryLeaf(der_child->instruction, 
-					der_child->subtree_hash, -1, 0, der_child->is_store);
-					new_child->pc_map = der_child->get_pc();
-					new_child->memory_accesses = der_child->memory_accesses;
-					// delete child;
-					child = new_child;//replace original child with leaf node
-				
-			}
-			else if(InstructionNodeBranch* der_child = dynamic_cast<InstructionNodeBranch*>(child)){
-				InstructionNodeBranchLeaf* new_child = 
-					new InstructionNodeBranchLeaf(der_child->instruction, 
-					der_child->subtree_hash, -1, 0);
-					new_child->pc_map = der_child->get_pc();
-					new_child->relative_offsets = der_child->relative_offsets;
-					#ifdef trace_branch_outcomes
-					new_child->branch_outcomes = der_child->branch_outcomes;
-					#endif
-					new_child->is_backward_jump = der_child->is_backward_jump;
-					new_child->is_forward_jump = der_child->is_forward_jump;
-					//new_child->jump_targets = der_child->jump_targets; //handled as parameter  
-					// delete child;
-					child = new_child;
-			}
-			else if(InstructionNodeR* der_child = dynamic_cast<InstructionNodeR*>(child)){
-				InstructionNodeLeaf* new_child = 
-					new InstructionNodeLeaf(der_child->instruction, 
-					der_child->subtree_hash, -1);
-					new_child->pc_map = der_child->get_pc();
-					// delete child;
-					child = new_child;
-			}
-			else{
-				printf("[ERROR] unknown type of child node\n");
-				exit(1);
-				return 3;
-			}
+			//turn the child into a leaf: what it counted stays, the subtree below it goes
+			child.node->node_type = (NODE_TYPE)((((uint8_t)child.node->node_type) & ~(uint8_t)NODE_TYPE::NODE) 
+											| (uint8_t)NODE_TYPE::LEAF);
+			child.node->children.clear();
 		}
 		
-		child->prune_tree(weight_threshold, depth+1);
-		child_idx++;
+		child.node->prune_tree(weight_threshold, depth+1);
 	}
 	return 0;
-}
-
-std::map<uint64_t, int> InstructionNodeR::get_pc(){
-	std::map<uint64_t, int> pcs; 
-
-	#ifdef trace_pcs
-	for (InstructionNode* child : children) {
-		std::map<uint64_t, int> child_pcs = child->get_pc();
-		pcs.insert(child_pcs.begin(), child_pcs.end());
-	}
-	#endif
-	return pcs;
-}
-
-InstructionNodeLeaf::InstructionNodeLeaf(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t pc)
-		: InstructionNode(instruction, parent_hash){
-	//pc_map.insert({pc,1}); //this is handled in the update step
-}
-
-InstructionNode* InstructionNodeLeaf::insert(const StepInsertInfo& p){
-	printf("[Insert ERROR] Maximum depth reached");
-	return NULL;
-}
-
-std::map<uint64_t, int> InstructionNodeLeaf::get_pc(){
-	return pc_map;
-}
-
-void InstructionNodeLeaf::_print(uint8_t level){
-		for (int i = 1; i < level; i++) {
-			std::cout << "\t";
-		}
-		const char* instruction_string = "UNKWN ";
-		if(instruction < Opcode::mappingStr.size()){
-			instruction_string = Opcode::mappingStr[instruction];
-		}
-		std::cout << "[" << instruction_string << "(" << weight << ")]" << std::endl;
-}
-
-std::stringstream InstructionNodeLeaf::to_dot(const char* tree_op_name, const char* parent_name,
-								uint depth, uint id, uint64_t parent_hash, 
-								std::stringstream& dot_stream,  std::stringstream& connections_stream,
-								uint64_t tree_weight, uint64_t total_instructions, 
-								bool reduce_graph_output, float branch_omission_threshold){
-		const char* instruction_string = "UNKWN ";
-		if(instruction < Opcode::mappingStr.size()){
-			instruction_string = Opcode::mappingStr[instruction];
-		}
-		const char* label = instruction_string;
-		std::stringstream name;
-		//HTML type
-		if(depth>=trace_depth-1){
-			name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
-			
-			dot_stream << name.str(); 
-			float per_weight = (float)weight/(float)tree_weight;
-			uint16_t color_index = per_weight * 8 + 0.1 + 1; //9 colors (1-9) TODO configure rounding
-			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-			<< "<TR><TD>" 
-			<< label 
-			<< "</TD></TR>" 
-			<< "<TR><TD><FONT COLOR=\"0.6 0.6 1.000\" POINT-SIZE=\"10\">" 
-			<< std::hex << subtree_hash << std::dec 
-			<< "</FONT></TD></TR>" 
-
-			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
-			for (auto const& x : pc_map)
-			{
-				dot_stream  << x.first << ":" << x.second << " "; 
-			}
-				
-			dot_stream << std::dec 
-			<< "</FONT></TD></TR></TABLE>" 
-
-			<< ">, color=" 
-			<< color_index << "]" 
-			<< std::endl;
-
-			connections_stream << parent_name << " -> " << name.str();
-			connections_stream << "[label=\"" << weight << "\" decorate=true";
-
-			if(reduce_graph_output && per_weight<branch_omission_threshold){
-				int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-				//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
-				connections_stream << " style=\"dashed\" color=\"gray" << shade
-				<<  "\" fontcolor=\"gray" << shade 
-				<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
-				//skip adding children to graph
-				return name; 
-			}else{
-				connections_stream << "]" << std::endl;
-			}
-
-		}else{ //should only happen wih pruned trees
-			name << "pruned_" << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
-			
-			dot_stream << name.str(); 
-			//float per_weight = (float)weight/(float)tree_weight;
-			uint16_t color_index = 1; //9 colors (1-9) TODO configure rounding
-			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-			<< "<TR><TD>" 
-			<< label 
-			<< "</TD></TR>" 
-			<< "<TR><TD><FONT COLOR=\"0.8 0.0 0.1\" POINT-SIZE=\"14\">" 
-			<< std::hex << "pruned" << std::dec 
-			<< "</FONT></TD></TR>" 
-
-			#ifdef dot_pc_on_pruned_nodes
-			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
-			for (auto const& x : pc_map)
-			{
-				dot_stream  << x.first << ":" << x.second << " "; 
-			}
-				
-			dot_stream << std::dec 
-			<< "</FONT></TD></TR>" 
-			#endif
-			<< "</TABLE>" << ">, color=" 
-			<< color_index << "]" 
-			<< std::endl;
-
-			connections_stream << parent_name << " -> " << name.str();
-			connections_stream << "[label=\"" << weight << "\" decorate=true";
-			connections_stream << "]" << std::endl;
-
-			dot_stream << std::dec << std::endl;
-			//<< "Error: using leaf node inside tree" << std::endl;
-			printf("[Warning]: using leaf node inside tree for dot (pruned?)\n");
-			return name;
-		}
-
-		
-		//dont process children as this is a leaf node
-
-		return name;
-}
-
-void InstructionNodeLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
-		InstructionNode::update_weight(p, depth);
-		pc_map[p.pc]++; //if key does not exist, it is created with value 0 
-	}
-
-nlohmann::ordered_json InstructionNodeLeaf::to_json(){
-	nlohmann::ordered_json additional_fields;
-	additional_fields["PCs"] = pc_map;
-
-	nlohmann::json base_class_json = InstructionNode::to_json();
-	base_class_json.update(additional_fields);
-	return base_class_json;
 }
 
 MemoryNode::MemoryNode(bool is_store_instruction) : is_store(is_store_instruction){
@@ -1229,307 +1311,32 @@ MemoryNode::MemoryNode(bool is_store_instruction) : is_store(is_store_instructio
 void MemoryNode::register_access(uint64_t pc, uint64_t address, 
 	AccessType access_type, uint64_t prev_access, 
 				uint64_t stackpointer, uint64_t framepointer, const char* peripheral_name){
+	//last_access is never updated, so this sums the addresses rather than the distances
+	//between them. The exported OffsetSum field has always meant that.
 	uint64_t access_offset = abs((long int)(address-last_access));
 	access_offset_sum += access_offset;
-	int64_t accessor_diff = 0; 
-	accessor_diff = prev_access - last_access;
 
 	Opcode::MemoryRegion memory_location = Opcode::MemoryRegion::NONE;
 	if(peripheral_name != nullptr){
 		//address hit a registered peripheral region - classify as PERIPHERAL instead of the stack/heap/frame heuristic
-		memory_location = memory_location | MemoryRegion::PERIPHERAL;
+		memory_location = memory_location | Opcode::MemoryRegion::PERIPHERAL;
 		std::string name(peripheral_name);
 		peripheral_by_address[address] = name;
 		peripheral_access_counts[name]++;
 	}else if(framepointer>0 && address <= framepointer && address >= stackpointer){
 		//address is in Frame
-		memory_location = memory_location | MemoryRegion::FRAME;
+		memory_location = memory_location | Opcode::MemoryRegion::FRAME;
 	}else{
 		if(address<stackpointer){
 			//address is not on the Stack
-			memory_location = memory_location | MemoryRegion::HEAP;
-			//printf("HEAP Access %lx\n",address);
+			memory_location = memory_location | Opcode::MemoryRegion::HEAP;
 		}else{
 			//address is on the Stack but not in Frame
-			memory_location = memory_location | MemoryRegion::STACK;
-			//printf("STACK Access %lx\n",address);
+			memory_location = memory_location | Opcode::MemoryRegion::STACK;
 		}
 	}
-	// Use unordered_map for O(1) lookup/insert
 	auto& access_entry = memory_accesses[pc];
 	access_entry[address] = memory_location;
-}
-
-InstructionNodeMemory::InstructionNodeMemory(Opcode::Mapping instruction, uint64_t parent_hash, uint64_t memory_access, bool is_store_instruction)
-			: InstructionNode(instruction, parent_hash), 
-			  MemoryNode(is_store_instruction),
-			  InstructionNodeR(instruction, parent_hash){ 
-}
-
-void InstructionNodeMemory::_print(uint8_t level){
-	for (int i = 1; i < level; i++) {
-		std::cout << "\t";
-	}
-	const char* instruction_string = "UNKWN MEMORY ";
-	if(instruction < Opcode::mappingStr.size()){
-		instruction_string = Opcode::mappingStr[instruction];
-	}
-	std::cout << "[" << instruction_string << "(" << weight << ")]" << std::endl;
-	for (auto child : children) {
-		child->_print(level + 1);
-	}
-}
-
-std::stringstream InstructionNodeMemory::to_dot(const char* tree_op_name, const char* parent_name,
-							uint depth, uint id, uint64_t parent_hash, 
-							std::stringstream& dot_stream,  std::stringstream& connections_stream,
-							uint64_t tree_weight, uint64_t total_instructions, 
-							bool reduce_graph_output, float branch_omission_threshold){
-	const char* instruction_string = "UNKWN MEMORY ";
-	if(instruction < Opcode::mappingStr.size()){
-		instruction_string = Opcode::mappingStr[instruction];
-	}
-	const char* label = instruction_string;
-	std::stringstream name;
-
-	//HTML type
-	if(depth>0){
-		name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_Mem_" << instruction_string;
-		
-		dot_stream << name.str(); 
-		float per_weight = (float)weight/(float)tree_weight;
-		uint16_t color_index = per_weight * 8 + 0.1 + 1; //9 colors (1-9) TODO configure rounding
-		
-		dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-		<< "<TR><TD>" 
-		<< label 
-		<< "</TD></TR>" 
-
-		<< "<TR><TD>";
-		uint dependencies_count = 0;
-		for (size_t i = 0; i < trace_depth; i++)
-		{
-			if(depends_true_on(i)){
-				dependencies_count++;
-				dot_stream << "<FONT COLOR=\"" 
-				<< dot_hue(depth-i) << " " << dot_sat(depth-i,0) << " " << dot_val(depth,0) << "\">" 
-				<< i << " \n" << "</FONT>";
-			}
-		}
-		dot_stream << "</TD></TR>"
-
-		<< "<TR><TD><FONT COLOR=\"0.6 0.6 1.000\" POINT-SIZE=\"10\">" 
-		<< std::hex << subtree_hash << std::dec 
-		<< "</FONT></TD></TR>"
-		<< "<TR><TD><FONT COLOR=\"0.2 0.8 1.000\" POINT-SIZE=\"10\">";
-		//<< (int)memory_location << ": ";
-		dot_stream << "[";
-		for (auto &&i : this->memory_accesses)
-		{
-			dot_stream << std::hex << i.first << ": {";
-			for(auto &&pair : i.second){
-				dot_stream << "(" << std::hex << (pair.first & 0xFFFF) << " - " << std::hex << (int)pair.second << "), ";
-			}
-			dot_stream << std::hex << i.first << "}" << std::dec;
-		}
-		dot_stream << std::dec << "]";
-		dot_stream 
-		<< "</FONT></TD></TR></TABLE>" 
-		<< ">, color=" 
-		<< color_index << "]" 
-		<< std::endl;
-
-		connections_stream << parent_name << " -> " << name.str();
-		connections_stream << "[label=\"" << weight << "\" decorate=true";
-
-		if(reduce_graph_output && per_weight<branch_omission_threshold){
-			int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-			//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
-			connections_stream << " style=\"dashed\" color=\"gray" << shade
-			<<  "\" fontcolor=\"gray" << shade 
-			<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
-			//skip adding children to graph
-			return name; 
-		}else{
-			connections_stream << "]" << std::endl;
-		}
-
-	}else{
-		name << instruction_string;
-
-		dot_stream << name.str(); 
-		std::stringstream top_label;
-		float per_weight = (float)weight/(float)total_instructions;
-		top_label << "|{" << label << " | " << (float)(((int)(per_weight * 1000.0)) % 1000) / 10.0 << " | " << weight << "/" << total_instructions << "}|";
-		uint16_t color_index = std::min(11.0, (per_weight*2.0) * 10 + 0.1 + 1); //TODO is half of all instructions a good max?
-		dot_stream << "[label=\"" << top_label.str() << "\", shape = record, color=" << color_index << ", colorscheme=spectral11" << "]" << std::endl;
-	}
-
-	int child_index = 0;
-	for (auto child : children) {
-		child->to_dot(tree_op_name, name.str().c_str(), 
-					depth + 1, child_index, subtree_hash, 
-					dot_stream, connections_stream, 
-					tree_weight,total_instructions,
-					reduce_graph_output, branch_omission_threshold);
-		child_index ++;
-	}
-
-	return name;
-}
-
-void InstructionNodeMemory::update_weight(const StepUpdateInfo& p, uint32_t depth){
-	InstructionNode::update_weight(p, depth);
-	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer, p.peripheral_name);
-}
-
-std::vector<PathNode> InstructionNodeMemory::path_to_path_nodes(Path path, uint depth){
-	std::vector<PathNode> nodes = InstructionNodeR::path_to_path_nodes(path, depth);
-	if(!nodes.empty()){
-		nodes.front().extra_fields = MemoryNode::memory_to_json();
-	}
-	return nodes;
-}
-
-InstructionNodeMemoryLeaf::InstructionNodeMemoryLeaf(Mapping instruction, uint64_t parent_hash, uint64_t pc, 
-			uint64_t memory_access, bool is_store_instruction)
-			: InstructionNode(instruction, parent_hash), 
-			  MemoryNode(is_store_instruction),
-			  InstructionNodeLeaf(instruction, parent_hash, pc){
-}
-
-void InstructionNodeMemoryLeaf::_print(uint8_t level){
-	printf("Not implemented");
-}
-
-void InstructionNodeMemoryLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
-	InstructionNode::update_weight(p, depth);
-	register_access(p.pc, p.memory_address, p.access_type, 0, p.stack_pointer, p.frame_pointer, p.peripheral_name);
-	pc_map[p.pc]++;
-}
-
-std::vector<PathNode> InstructionNodeMemoryLeaf::path_to_path_nodes(Path path, uint depth){
-	std::vector<PathNode> nodes = InstructionNode::path_to_path_nodes(path, depth);
-	if(!nodes.empty()){
-		nodes.front().extra_fields = MemoryNode::memory_to_json();
-	}
-	return nodes;
-}
-
-std::stringstream InstructionNodeMemoryLeaf::to_dot(const char* tree_op_name, const char* parent_name,
-								uint depth, uint id, uint64_t parent_hash, 
-								std::stringstream& dot_stream,  std::stringstream& connections_stream,
-								uint64_t tree_weight, uint64_t total_instructions, 
-								bool reduce_graph_output, float branch_omission_threshold){
-									const char* instruction_string = "UNKWN ";
-		if(instruction < Opcode::mappingStr.size()){
-			instruction_string = Opcode::mappingStr[instruction];
-		}
-		const char* label = instruction_string;
-		std::stringstream name;
-		//HTML type
-		if(depth>=trace_depth-1){//standard leaf node
-			name << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
-			
-			dot_stream << name.str(); 
-			float per_weight = (float)weight/(float)tree_weight;
-			uint16_t color_index = per_weight * 8 + 0.1 + 1; //9 colors (1-9) TODO configure rounding
-			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-			<< "<TR><TD>" 
-			<< label 
-			<< "</TD></TR>" 
-			<< "<TR><TD><FONT COLOR=\"0.6 0.6 1.000\" POINT-SIZE=\"10\">" 
-			<< std::hex << subtree_hash << std::dec 
-			<< "</FONT></TD></TR>"
-			<< "<TR><TD><FONT COLOR=\"0.2 0.8 1.000\" POINT-SIZE=\"10\">";
-			dot_stream << "[";
-			for (auto &&i : this->memory_accesses)
-			{
-				dot_stream << std::hex << i.first << ": {";
-				for(auto &&pair : i.second){
-					dot_stream << "(" << std::hex << (pair.first & 0xFFFF) << " - " << std::hex << (int)pair.second << "), ";
-				}
-				dot_stream << std::hex << i.first << "}" << std::dec;
-			}
-			dot_stream << std::dec << "]" 
-
-			<< "</FONT></TD></TR>"  
-
-			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
-			for (auto const& x : pc_map)
-			{
-				dot_stream  << x.first << ":" << x.second << " "; 
-			}
-				
-			dot_stream << std::dec 
-			<< "</FONT></TD></TR></TABLE>" 
-
-			<< ">, color=" 
-			<< color_index << "]" 
-			<< std::endl;
-
-			connections_stream << parent_name << " -> " << name.str();
-			connections_stream << "[label=\"" << weight << "\" decorate=true";
-
-			if(reduce_graph_output && per_weight<branch_omission_threshold){
-				int shade = std::min(95,(int)(100.0-((per_weight/branch_omission_threshold)*100.0))) ;
-				//printf("ommitting branch [%lx] with per_weight: %f\n",subtree_hash, per_weight);
-				connections_stream << " style=\"dashed\" color=\"gray" << shade
-				<<  "\" fontcolor=\"gray" << shade 
-				<< "\"]" <<std::endl; //std::min(95,(int)(100.0-per_weight*100.0))
-				//skip adding children to graph
-				return name; 
-			}else{
-				connections_stream << "]" << std::endl;
-			}
-
-		}else{//leaf node inside tree (only created by pruning the tree)
-			name << "pruned_" << tree_op_name << "_d" << depth << "_c" << id << "_p" << parent_hash << "_" << instruction_string;
-			
-			dot_stream << name.str(); 
-			//float per_weight = (float)weight/(float)tree_weight;
-			uint16_t color_index = 1; //9 colors (1-9) TODO configure rounding
-			dot_stream << "[label=<<TABLE BORDER=\"2\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\">" 
-			<< "<TR><TD>" << label << "</TD></TR>" 
-			<< "<TR><TD><FONT COLOR=\"0.8 0.0 0.1\" POINT-SIZE=\"14\"> pruned </FONT></TD></TR>"
-
-			#ifdef dot_pc_on_pruned_nodes
-			<< "<TR><TD><FONT COLOR=\"0.6 0.4 0.600\" POINT-SIZE=\"10\">" << std::hex;
-			for (auto const& x : pc_map)
-			{
-				dot_stream  << x.first << ":" << x.second << " "; 
-			}
-			
-			dot_stream << std::dec 
-			<< "</FONT></TD></TR>" 
-			#endif
-			<< "</TABLE>" << ">, color=" 
-			<< color_index << "]" 
-			<< std::endl;
-
-			connections_stream << parent_name << " -> " << name.str();
-			connections_stream << "[label=\"" << weight << "\" decorate=true";
-			connections_stream << "]" << std::endl;
-
-			dot_stream << std::dec << std::endl;
-			printf("[Warning]: using leaf node inside tree for dot (pruned?)\n");
-			return name;
-		}
-
-		//dont process children as this is a leaf node
-
-		return name;
-}
-
-BranchNode::BranchNode(int64_t offset){
-	if(offset!=0){
-		relative_offsets[offset]++;
-		if(offset<0){
-			is_backward_jump = true;
-		}else{
-			is_forward_jump = true;
-		}
-	}
 }
 
 void BranchNode::register_branch(uint64_t pc, BranchOutcome outcome, int64_t offset, bool pc_relative){
@@ -1554,144 +1361,6 @@ void BranchNode::register_branch(uint64_t pc, BranchOutcome outcome, int64_t off
 			is_forward_jump = true;
 		}
 	}
-}
-
-void InstructionNodeBranch::update_weight(const StepUpdateInfo& p, uint32_t depth){
-	InstructionNodeR::update_weight(p, depth);
-	if(p.branch_outcome!=BranchOutcome::NONE){
-		register_branch(p.pc, p.branch_outcome, p.branch_offset, instruction!=Mapping::JALR);
-	}
-}
-
-void InstructionNodeBranchLeaf::update_weight(const StepUpdateInfo& p, uint32_t depth){
-	InstructionNodeLeaf::update_weight(p, depth);
-	if(p.branch_outcome!=BranchOutcome::NONE){
-		register_branch(p.pc, p.branch_outcome, p.branch_offset, instruction!=Mapping::JALR);
-	}
-}
-
-InstructionNodeBranch::InstructionNodeBranch(Mapping instruction, uint64_t parent_hash, int64_t offset): 
-			  InstructionNode(instruction, parent_hash), 
-			  BranchNode(offset),
-			  InstructionNodeR(instruction, parent_hash){
-			  }
-
-InstructionNodeBranchLeaf::InstructionNodeBranchLeaf(Mapping instruction, uint64_t parent_hash, uint64_t pc, 
-									int64_t offset): 
-			  InstructionNode(instruction, parent_hash), 
-			  BranchNode(offset),
-			  InstructionNodeLeaf(instruction, parent_hash, pc){
-			  }
-
-std::vector<PathNode> InstructionNodeR::path_to_path_nodes(Path path, uint depth){
-	std::vector<PathNode> nodes; 
-	//const InstructionNode& node, float score_b, float score_m, float inv_d, std::map<uint64_t, int> pcs)
-		
-	std::set<int8_t> indices_anti;
-	std::set<int8_t> indices_out;
-	for (size_t i = 0; i < trace_depth; i++) {
-		if (dependencies_anti_[i]) {
-			indices_anti.insert(i);
-		}
-		if (dependencies_output_[i]) {
-			indices_out.insert(i);
-		}
-	}
-
-	PathNode n = PathNode(instruction, weight, get_score_bonus(), get_score_multiplier(), get_inv_dep_score(), 
-							get_pc(), 
-							dependencies_true_, indices_out, indices_anti);
-	nodes.push_back(n);
-
-	if((depth+1)>=path.length){ //path.opcodes[depth+1] == Opcode::UNDEF){
-		return nodes;
-	}
-	else{
-
-		InstructionNode* found_child = NULL;
-		for (auto child : children){
-			
-			if(child->instruction == path.opcodes[depth+1]){
-				found_child = child;
-				break;
-			}
-		}
-		if(found_child==NULL){
-			printf("[ERROR] no children in tree that match discovered path"); //should not be possible
-		}
-		std::vector<PathNode> child_nodes = found_child->path_to_path_nodes(path, depth+1); 
-		nodes.insert(nodes.end(), child_nodes.begin(), child_nodes.end());
-		return nodes;
-	}
-}
-
-//find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
-// and another possible branch not taken, which would lead to a different sequence 
-std::vector<BranchingPoint> InstructionNodeR::find_variant_branch(Path path, uint8_t depth){//uint8_t variant_index
-	//find branching point
-	//then create new Path up to this point and extend_path()
-
-	std::vector<BranchingPoint> branching_points; 
-
-	if((uint32_t)(depth+1)>=path.length){ //path.opcodes[depth+1] == Opcode::UNDEF){
-		return branching_points;
-	}
-	else{
-
-		InstructionNode* found_child = NULL;
-		int64_t current_max_weight = -1;
-		double current_max_ratio = -1.0;
-		Opcode::Mapping current_instruction = Opcode::UNDEF;
-		for (auto child : children){
-			
-			if(child->instruction == path.opcodes[depth+1]){
-				found_child = child; //if child is on previous best path, continue variant search with that node
-			}else{
-				double current_ratio = (double)child->weight / (double)weight; //otherwise save possible branching point
-				if(current_ratio>current_max_ratio){
-					current_max_weight = child->weight;
-					current_max_ratio = current_ratio;
-					current_instruction = child->instruction;
-				}
-			}
-		}
-
-		if(found_child==NULL){
-			printf("[ERROR] no children in tree that match discovered path"); //should not be possible
-		}
-
-		if(current_max_weight>0){
-			BranchingPoint bp = {depth, current_instruction, current_max_weight, current_max_ratio, this}; 
-			branching_points.push_back(bp);
-		}
-		std::vector<BranchingPoint> child_branching_points = found_child->find_variant_branch(path, depth+1); 
-		branching_points.insert(branching_points.end(), child_branching_points.begin(), child_branching_points.end());
-		return branching_points;
-	}
-}
-
-NODE_TYPE InstructionNodeR::get_node_type(){
-	return NODE_TYPE::NODE;
-}
-
-NODE_TYPE InstructionNodeLeaf::get_node_type(){
-	return NODE_TYPE::LEAF;
-}
-
-NODE_TYPE InstructionNodeBranch::get_node_type(){
-	return NODE_TYPE::BRANCH_R;
-}
-
-NODE_TYPE InstructionNodeBranchLeaf::get_node_type(){
-	return NODE_TYPE::BRANCH_L;
-}
-
-NODE_TYPE InstructionNodeMemory::get_node_type(){
-	return NODE_TYPE::MEMORY_R;
-}
-
-NODE_TYPE InstructionNodeMemoryLeaf::get_node_type(){
-	return NODE_TYPE::MEMORY_L;
 }
 
 

@@ -23,7 +23,7 @@ LoadedLibrary load_scoring_functions(const std::string& libraryPath);
 
 // Evaluates every provided scoring function against every instruction tree and prints the best
 // sequences found for each scoring function (used by the interactive analysis mode).
-void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNodeR> instruction_trees);
+void analyze_trees(std::array<ScoreFunction, SF_BATCH_SIZE> score_functions, std::list<InstructionNode> instruction_trees);
 
 double similarity_jaccard_positions(const std::vector<Opcode::Mapping>& a, const std::vector<Opcode::Mapping>& b);
 

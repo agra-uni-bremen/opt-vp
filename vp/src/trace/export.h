@@ -3,7 +3,7 @@
 // The exporters, one per format.
 //
 // The dot and csv exporters redirect `std::cout` at a file while they run, because the node
-// classes write their own output through `std::cout` (`InstructionNodeR::tree_to_dot`,
+// classes write their own output through `std::cout` (`InstructionNode::tree_to_dot`,
 // `to_csv`). Do not call them from anywhere that is also writing to standard output. The two
 // JSON exporters build a value and write it to their own stream, so they are safe anywhere.
 
