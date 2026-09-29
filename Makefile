@@ -76,5 +76,8 @@ clean-all: vp-clean qt-clean
 
 clean: vp-clean
 
+# Format this repository's own sources. The name tests have to be grouped: with -print bound to
+# the last -o branch only, the old form printed .cpp files and no header at all, and it descended
+# into the vendored trees.
 codestyle:
-	find . -type d \( -name .git -o -name dependencies \) -prune -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -print | xargs clang-format -i -style=file
+	find vp/src \( -path vp/src/vendor -o -path vp/src/lib \) -prune -o \( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \) -print | xargs clang-format -i -style=file

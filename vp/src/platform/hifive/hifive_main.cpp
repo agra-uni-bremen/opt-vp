@@ -181,7 +181,7 @@ int sc_main(int argc, char **argv) {
 
 	MemoryDMI dram_dmi = MemoryDMI::create_start_size_mapping(dram.data, opt.dram_start_addr, dram.size);
 	MemoryDMI flash_dmi = MemoryDMI::create_start_size_mapping(flash.data, opt.flash_start_addr, flash.size);
-	InstrMemoryProxy instr_mem(flash_dmi, core);
+	InstrMemoryProxy instr_mem(flash_dmi, core, &iss_mem_if);
 
 	std::shared_ptr<BusLock> bus_lock = std::make_shared<BusLock>();
 	iss_mem_if.bus_lock = bus_lock;

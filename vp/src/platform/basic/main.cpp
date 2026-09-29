@@ -139,7 +139,7 @@ int sc_main(int argc, char **argv) {
 	DebugMemoryInterface dbg_if("DebugMemoryInterface");
 
 	MemoryDMI dmi = MemoryDMI::create_start_size_mapping(mem.data, opt.mem_start_addr, mem.size);
-	InstrMemoryProxy instr_mem(dmi, core);
+	InstrMemoryProxy instr_mem(dmi, core, &iss_mem_if);
 
 	std::shared_ptr<BusLock> bus_lock = std::make_shared<BusLock>();
 	iss_mem_if.bus_lock = bus_lock;

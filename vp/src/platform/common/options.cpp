@@ -22,6 +22,11 @@ Options::Options(void) {
 			"the largest speed knob the VP has: md5sum runs 45 percent faster at 1000. It delays when "
 			"the core observes an interrupt or a peripheral by up to that time, so raise it only for a "
 			"workload that does not depend on that")
+		("performance-mode", po::bool_switch(&performance_mode),
+			"trade timing accuracy for speed: keep direct memory access on and raise the tlm quantum "
+			"to 100000 ns, which is about twice as fast as the default. The core then runs up to that "
+			"far ahead of the rest of the simulation, so use it only for a workload whose result does "
+			"not depend on when it observes an interrupt or a peripheral. A switch given after it wins")
 		("no-instr-dmi", po::bool_switch(), "fetch instructions through the bus instead of by direct memory access")
 		("no-data-dmi", po::bool_switch(), "run load/store through the bus instead of by direct memory access")
 		("no-dmi", po::bool_switch(), "run both instruction fetch and load/store through the bus (about a third slower)")
@@ -73,6 +78,13 @@ void Options::add_entry_point_option(OptionValue<unsigned long> &entry_point) {
 
 Options::~Options(){};
 
+void Options::apply_performance_mode() {
+	//keep this list and the help text of --performance-mode together
+	use_instr_dmi = true;
+	use_data_dmi = true;
+	tlm_global_quantum = performance_mode_quantum;
+}
+
 void Options::parse(int argc, char **argv) {
 	try {
 		auto parser = po::command_line_parser(argc, argv);
@@ -86,6 +98,16 @@ void Options::parse(int argc, char **argv) {
 		}
 
 		po::notify(vm);
+
+		//first, so a switch that turns one of its settings off still wins
+		if (performance_mode) {
+			apply_performance_mode();
+			if (vm.count("tlm-global-quantum")) {
+				//an explicit quantum is what the caller meant, whichever order they wrote it in
+				tlm_global_quantum = vm["tlm-global-quantum"].as<unsigned int>();
+			}
+		}
+
 		//direct memory access is the default, so only the switches that turn it off do anything
 		if (vm["no-dmi"].as<bool>()) {
 			use_data_dmi = false;
@@ -144,6 +166,7 @@ void Options::printValues(std::ostream& os) const {
 	os << "trace_mode: " << trace_mode << std::endl;
 	os << "trace_depth: " << instruction_tree_depth << std::endl;
 	os << "tlm_global_quantum: " << tlm_global_quantum << std::endl;
+	os << "performance_mode: " << performance_mode << std::endl;
 	os << "use_instr_dmi: " << use_instr_dmi << std::endl;
 	os << "use_data_dmi: " << use_data_dmi << std::endl;
 	os << "suppress-prompts: " << suppress_prompts << std::endl;

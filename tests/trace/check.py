@@ -55,6 +55,10 @@ def run_case(case):
         shutil.rmtree(out_dir)
 
     result = vpbench.run(vp, program, out_dir, case.get("flags", []))
+    if result.get("timed_out"):
+        raise vpbench.VpError(
+            f"{case['name']}: the VP did not terminate and was killed\n"
+            f"  {' '.join(result['command'])}")
     if result["exit_code"] != 0:
         raise vpbench.VpError(
             f"{case['name']}: the VP exited {result['exit_code']}\n"

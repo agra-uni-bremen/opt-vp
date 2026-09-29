@@ -6,7 +6,14 @@
 
 namespace rv32 {
 
-/* For optimization, use DMI to fetch instructions */
+/* For optimization, use DMI to fetch instructions.
+ *
+ * Direct memory access reads the memory behind the bus, so it can only serve an address that is
+ * already physical. While paging is off, which is satp in BARE mode, a virtual address is its own
+ * physical address and this fast path is correct. Once a program turns paging on, fetching has to
+ * go through the interface that translates, so the proxy hands the fetch to `translating`.
+ * A platform without an MMU passes no `translating` interface and always takes the fast path.
+ */
 struct InstrMemoryProxy : public instr_memory_if {
 	MemoryDMI dmi;
 
@@ -14,12 +21,21 @@ struct InstrMemoryProxy : public instr_memory_if {
 	sc_core::sc_time clock_cycle = sc_core::sc_time(10, sc_core::SC_NS);
 	sc_core::sc_time access_delay = clock_cycle * 2;
 
-	InstrMemoryProxy(const MemoryDMI &dmi, ISS &owner) : dmi(dmi), quantum_keeper(owner.quantum_keeper) {}
+	InstrMemoryProxy(const MemoryDMI &dmi, ISS &owner, instr_memory_if *translating = nullptr)
+	    : dmi(dmi), quantum_keeper(owner.quantum_keeper), core(owner), translating(translating) {}
 
 	virtual uint32_t load_instr(uint64_t pc) override {
+		if (translating != nullptr && core.csrs.satp.fields.mode != SATP_MODE_BARE) {
+			return translating->load_instr(pc);
+		}
 		quantum_keeper.inc(access_delay);
 		return dmi.load<uint32_t>(pc);
 	}
+
+  private:
+	ISS &core;
+	//! Where a fetch goes once paging is on. Null on a platform that cannot page.
+	instr_memory_if *translating = nullptr;
 };
 
 struct CombinedMemoryInterface : public sc_core::sc_module,

@@ -48,6 +48,26 @@ public:
 	bool use_data_dmi = true;
 
 	/**
+	 * Trade timing accuracy for speed (--performance-mode).
+	 *
+	 * One switch for every setting that makes a run faster and the simulated timing less exact.
+	 * Use it for a workload whose result does not depend on when the core observes an interrupt
+	 * or a peripheral, which is what a benchmark traced for JITR usually is.
+	 *
+	 * Add a new setting to `apply_performance_mode` and to the switch's help text together, so
+	 * the two never disagree about what the mode does.
+	 */
+	bool performance_mode = false;
+	//! The quantum performance mode asks for, in ns. 10000 instructions at one cycle each.
+	static constexpr unsigned int performance_mode_quantum = 100000;
+
+	/**
+	 * Apply every setting that trades timing accuracy for speed. Called by `parse` before the
+	 * switches that turn single settings off, so an explicit switch still wins.
+	 */
+	void apply_performance_mode();
+
+	/**
 	 * The tracing settings as the trace library wants them.
 	 *
 	 * `hart_id` is zero unless the platform has more than one core, in which case pass each

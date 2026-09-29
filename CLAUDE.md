@@ -105,6 +105,20 @@ The VP supports a large number of command line options.
 ./vp/build/bin/tiny32-vp --intercept-syscalls "$input_file" --output-file "$out_dir/" -e
 ```
 
+`--performance-mode` trades timing accuracy for speed and halves the run time of a benchmark. It
+raises the TLM quantum, so the core runs further ahead of the rest of the simulation before
+synchronising: use it when the result does not depend on when the core observes an interrupt or a
+peripheral, which is the normal case for a benchmark traced for JITR. Every reference case
+produces the same trace with it as without. A switch given after it wins, so
+`--performance-mode --tlm-global-quantum 10` keeps the accurate quantum.
+
+Direct memory access is on by default and is worth about 30 percent. `--no-dmi` turns it off,
+which is only needed when something has to observe the core's memory traffic on the bus.
+
+```bash
+./vp/build/bin/tiny32-vp --intercept-syscalls "$input_file" --output-file "$out_dir/" -e --performance-mode
+```
+
 ## Tests
 
 There is currently no proper testing system in place. 

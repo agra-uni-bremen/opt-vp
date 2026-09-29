@@ -27,7 +27,13 @@ set(CMAKE_CXX_STANDARD 17)
 #         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wpedantic ${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "-g3")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+# -DNDEBUG is what CMake puts in a Release build itself. This project overrode the variable
+# without it, so a Release build ran all 237 asserts, several of them on the per instruction
+# path, which cost about 1.6 percent over the embench set.
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+# Optimised and still self checking: the same speed class as Release with the asserts live.
+# Use it while changing the ISS, and Release to measure or to run a benchmark.
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 if(INSTRUCTION_TREE_DEPTH)
 	add_compile_definitions(INSTRUCTION_TREE_DEPTH=${INSTRUCTION_TREE_DEPTH})

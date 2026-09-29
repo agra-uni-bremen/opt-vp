@@ -27,6 +27,7 @@ import re
 import resource
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -154,6 +155,9 @@ def run(vp, program, out_dir, flags=(), timeout=1800, env_extra=None):
     `out_dir` is created if it is absent and is passed to the VP with a trailing
     separator, which the VP needs because it builds filenames by concatenation.
 
+    A run that outlasts `timeout` seconds is killed, and the result says `timed_out`. Some
+    programs do not terminate on some platforms, and without this the whole check would hang.
+
     Peak memory comes from `os.wait4`, which reports the resource usage of that
     one child. `resource.getrusage(RUSAGE_CHILDREN)` would report the maximum
     over every child so far, which is wrong as soon as you run twice.
@@ -176,6 +180,11 @@ def run(vp, program, out_dir, flags=(), timeout=1800, env_extra=None):
     process = subprocess.Popen(command, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, env=env,
                                cwd=str(REPO_ROOT))
+    # A VP that does not terminate would otherwise block both reads below forever. Killing it
+    # closes the pipe, so the read returns and wait4 reaps the child with its resource usage.
+    expired = []
+    watchdog = threading.Timer(timeout, lambda: (expired.append(True), process.kill()))
+    watchdog.start()
     try:
         stdout = process.stdout.read()
         _, status, usage = os.wait4(process.pid, 0)
@@ -184,6 +193,7 @@ def run(vp, program, out_dir, flags=(), timeout=1800, env_extra=None):
         process.wait()
         raise
     finally:
+        watchdog.cancel()
         process.stdout.close()
     process.returncode = os.waitstatus_to_exitcode(status) if hasattr(
         os, "waitstatus_to_exitcode") else (status >> 8)
@@ -193,6 +203,7 @@ def run(vp, program, out_dir, flags=(), timeout=1800, env_extra=None):
     result = {
         "command": command,
         "exit_code": process.returncode,
+        "timed_out": bool(expired),
         "wall_s": round(wall_s, 3),
         "peak_rss_kb": usage.ru_maxrss,
         "user_s": round(usage.ru_utime, 3),

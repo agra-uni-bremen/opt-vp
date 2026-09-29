@@ -32,3 +32,8 @@ A snapshot records the flags it passed, not the VP's defaults. Two defaults chan
 * `occurrence` no longer takes 32 bytes per node.
 
 Comparisons within either side of that date are sound.
+
+`2026-09-29-fc8560-performance-mode.json` is the same commit measured with
+`--performance-mode`, which trades timing accuracy for speed. Compare it against
+`2026-09-29-28d43f.json` to see what the mode costs in accuracy terms and buys in time; do not
+treat it as a point in the default series.

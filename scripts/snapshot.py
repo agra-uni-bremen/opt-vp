@@ -89,8 +89,11 @@ def parse_args(argv):
                         help="trace depth; drives run time more than anything else (default: 6)")
     parser.add_argument("--repeat", type=int, default=1,
                         help="runs per workload, fastest is kept (default: 1)")
-    parser.add_argument("--flags", nargs="*", default=["-e"],
-                        help="extra VP flags (default: -e, the JITR export)")
+    # One string rather than a list: argparse cannot take a dash prefixed value in nargs="*",
+    # so --flags "-e --performance-mode" is the only form that works for more than one flag.
+    parser.add_argument("--flags", default="-e",
+                        help='extra VP flags as one string (default: "-e", the JITR export). '
+                             'Quote them: --flags "-e --performance-mode"')
     parser.add_argument("--out", default=None, help="write here instead of docs/snapshots/")
     parser.add_argument("--dry-run", action="store_true", help="print the plan and exit")
     return parser.parse_args(argv)
@@ -163,7 +166,7 @@ def measure(vp, program, out_dir, flags, repeat):
 def take(args):
     vp = vpbench.find_vp(args.vp)
     workloads, directory = load_set(args.set, args.benchmarks)
-    flags = [*args.flags, "--trace-depth", str(args.depth)]
+    flags = [*args.flags.split(), "--trace-depth", str(args.depth)]
 
     found, missing = [], []
     for name in workloads:
@@ -211,7 +214,7 @@ def take(args):
             "benchmarks": str(directory),
             "vp": args.vp,
             "depth": args.depth,
-            "flags": list(args.flags),
+            "flags": args.flags.split(),
             "repeat": args.repeat,
             "workloads": [n for n, _ in found],
             "skipped": [n for n, _ in missing],
