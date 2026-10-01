@@ -17,4 +17,6 @@ constexpr unsigned SATP_MODE_SV32 = 1;
 constexpr unsigned SATP_MODE_SV39 = 8;
 constexpr unsigned SATP_MODE_SV48 = 9;
 constexpr unsigned SATP_MODE_SV57 = 10;
+//Sv64 is reserved in the privileged spec and has no defined page table layout, so the MMU
+//rejects it with the other unknown modes rather than decoding it.
 constexpr unsigned SATP_MODE_SV64 = 11;

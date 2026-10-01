@@ -61,8 +61,16 @@ void run_interactive(TraceReport &report) {
 			sf_lib = load_scoring_functions(report.config.scoring_library);
 			score_functions = sf_lib.functions;
 		} else if (mode == 'a') {
+			if (!score_functions[0]) {
+				std::cout << "no scoring library loaded, press 'r' first" << std::endl;
+				continue;
+			}
 			analyze_trees(score_functions, report.trees);
 		} else if (mode == 'b') {
+			if (!score_functions[0]) {
+				std::cout << "no scoring library loaded, press 'r' first" << std::endl;
+				continue;
+			}
 			using std::chrono::duration;
 			using std::chrono::high_resolution_clock;
 

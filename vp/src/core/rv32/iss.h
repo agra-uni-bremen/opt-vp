@@ -186,8 +186,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	PrivilegeLevel prv = MachineMode;
 	int64_t lr_sc_counter = 0;
 
-	//! Progress output every this many retired instructions. Compared against rather than
-	//! divided by, because the comparison runs once per instruction.
+	//! Progress output every n retired instructions. 
 	static constexpr uint64_t progress_report_interval = 1000000;
 	uint64_t next_progress_report = progress_report_interval;
 	uint64_t total_num_instr = 0;
@@ -201,7 +200,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	Opcode::Mapping op;
 
 	//records the executed instructions as execution sequence trees. Configure it once before
-	//the run with tracer.configure(); see vp/src/trace/tracer.h
+	//the run with tracer.configure() (see vp/src/trace/tracer.h)
 	Tracer tracer;
 
 	uint64_t prev_cycles = 0;
@@ -240,10 +239,10 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	std::string systemc_name;
 	tlm_utils::tlm_quantumkeeper quantum_keeper;
 	sc_core::sc_time cycle_time;
-	//! Cycles executed, as a time. A separate counter, because the cycle count can be inhibited
+	//! Cycles executed, as a time. Uses a separate counter, because the cycle count can be inhibited
 	//! (mcountinhibit.CY) while simulated time keeps running.
 	//! Counting it as a plain number instead, to save the division below, needs a second table of
-	//! per opcode cycle counts and measured 3 percent slower over the embench set.
+	//! per opcode cycle counts and is 3% slower.
 	sc_core::sc_time cycle_counter;
 	std::array<sc_core::sc_time, Opcode::NUMBER_OF_INSTRUCTIONS> instr_cycles;
 
@@ -253,6 +252,8 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 	ISS(uint32_t hart_id, bool use_E_base_isa = false);
 
 	void exec_step();
+	//! Drop the step of an instruction that raised a trap. See the comment on the definition.
+	void discard_trapped_step();
 
 	uint64_t get_current_cycles();
 
@@ -335,15 +336,30 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 		}
 	}
 
+	//! Record a store for the tracer. 
+	// `memory_access_map` is an ordered map keyed by address
+	// filling it is a tree insert on every store. 
+	// only the (somewhat deprecated) dot export reads it, so it might be a good idea to remove in the future
 	inline void log_memory_store(uint64_t address, uint64_t apc){
-		//update entry and invalidate last load
-		memory_access_map[address] = {apc, 0};
+		if (!tracer.enabled()) {
+			return;
+		}
+		if (tracer.records_memory_map()) {
+			//update entry and invalidate last load
+			memory_access_map[address] = {apc, 0};
+		}
 		last_memory_access = {address, AccessType::STORE};
 		last_memory_peripheral = resolve_peripheral(address);
 	}
+	//! Record a load for the tracer. See `log_memory_store`.
 	inline void log_memory_read(uint64_t address, uint64_t apc){
-		//update entry and keep last write
-		std::get<1>(memory_access_map[address]) = apc;
+		if (!tracer.enabled()) {
+			return;
+		}
+		if (tracer.records_memory_map()) {
+			//update entry and keep last write
+			std::get<1>(memory_access_map[address]) = apc;
+		}
 		last_memory_access = {address, AccessType::LOAD};
 		last_memory_peripheral = resolve_peripheral(address);
 	}
@@ -400,8 +416,7 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	void run() override;
 
-	//! Print the register file, then hand the trees to the trace library. The analysis and
-	//! every export live in vp/src/trace/, not here.
+	//! Print the register file, then hand the trees to the trace library. 
 	void show();
 };
 

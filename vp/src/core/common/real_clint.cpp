@@ -1,6 +1,9 @@
 #include <assert.h>
 #include <stddef.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "real_clint.h"
 
 enum {
@@ -18,8 +21,11 @@ enum {
 	MSIP_MASK = 0x1, // The upper MSIP bits are tied to zero
 };
 
-/* This is used to quantize a 1MHz value to the closest 32768Hz value */
-#define DIVIDEND (uint64_t(15625)/uint64_t(512))
+/* One 32768 Hz tick is 15625/512 microseconds. 
+ * Keep the two apart: written as one constant the
+ * integer division gives 30, which is a 33.3 kHz clock and 1.7 percent too fast. */
+#define TICK_USEC_NUM uint64_t(15625)
+#define TICK_USEC_DEN uint64_t(512)
 
 static void
 timercb(void *arg) {
@@ -78,12 +84,12 @@ uint64_t RealCLINT::usec_to_ticks(usecs usec) {
 	// https://github.com/RIOT-OS/RIOT/blob/d382bd656569599691c1a3e1c9b1662e07cf1a42/sys/include/xtimer/tick_conversion.h#L100-L106
 
 	uint64_t microseconds = usec.count();
-	return microseconds / DIVIDEND;
+	return microseconds * TICK_USEC_DEN / TICK_USEC_NUM;
 }
 
 RealCLINT::usecs RealCLINT::ticks_to_usec(uint64_t ticks) {
 	// See comment in RealCLINT::usec_to_ticks
-	return usecs(ticks * DIVIDEND);
+	return usecs(ticks * TICK_USEC_NUM / TICK_USEC_DEN);
 }
 
 void RealCLINT::post_write_mtimecmp(RegisterRange::WriteInfo info) {
@@ -103,7 +109,11 @@ void RealCLINT::post_write_mtimecmp(RegisterRange::WriteInfo info) {
 	harts.at(hart)->trigger_timer_interrupt(false);
 
 	uint64_t goal_ticks = cmp - time;
-	usecs duration = ticks_to_usec(goal_ticks);
+	//Software arms mtimecmp with all ones before writing the real value, which is what the
+	//privileged spec's own example does, so the conversion has to survive a goal no run reaches.
+	//Without the cap the multiply below wraps and the timer fires almost at once.
+	const uint64_t max_ticks = std::numeric_limits<uint64_t>::max() / TICK_USEC_NUM;
+	usecs duration = ticks_to_usec(std::min(goal_ticks, max_ticks));
 
 	timer->start(duration);
 }

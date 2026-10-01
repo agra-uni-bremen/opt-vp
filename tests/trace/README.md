@@ -49,6 +49,11 @@ record it:
     make -C sw/<program>
     python3 tests/trace/check.py --update --case <name>
 
+Two keys change how a case is treated. `"ci": false` leaves it out of `--ci`, for a
+program that needs a C library the CI image does not have. `"writes_files": false` says
+the case writes no output, so the counters and the register file are the whole check;
+the `no-trace` case uses it to pin that `--no-trace` does not change what a program does.
+
 ## Related
 
 `scripts/snapshot.py` measures cost rather than correctness: it runs the VP over a

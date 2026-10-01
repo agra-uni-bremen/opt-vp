@@ -1,0 +1,93 @@
+{
+ "case": "clint",
+ "counters": {
+  "cycles": 216,
+  "instructions": 213,
+  "retired": 213,
+  "trees": 7,
+  "unused_instructions": 132
+ },
+ "digest": "4a154d0fc62ac186cc32384e8fc31bc9f041b697e21c5d5a55972a87eea82aa6",
+ "files": {
+  "mainADD.json": {
+   "bytes": 2987,
+   "raw_sha256": "5eb814701851a9c949e82300978f585e48bd0d0bf6da081d35565abdf7609277",
+   "semantic_sha256": "bb50ba38a7fc0070c50a3e1b2de16ad2611e22792981e9e509de35087e65d867"
+  },
+  "mainADDI.json": {
+   "bytes": 11503,
+   "raw_sha256": "57af61cc06abacf9445c0f43c073a403f7f52fa7eea3d5c06c276ae4e98b47f7",
+   "semantic_sha256": "37e3a9e54bc7f7dbf3b6278613d7f9f53f3d10e208482491325da9ab6c9ddb44"
+  },
+  "mainBLT.json": {
+   "bytes": 2625,
+   "raw_sha256": "fe4d80ea62fad46311e8c9d9ebda788fed4b886bc27ae1adda0ea0465adb4fe5",
+   "semantic_sha256": "b18ae57c663bf43a2b4d05d347fb690930e4537002f8e7ef714892141096dbd6"
+  },
+  "mainCSRRS.json": {
+   "bytes": 744,
+   "raw_sha256": "73801b2f53144d59c2cc474011c3fed6967d9fe24daaed00d7a58b6f94bb82c1",
+   "semantic_sha256": "0eb7424ebb526c31045acc7423079f43c89483d116a53ce60f4c11754b6f58d4"
+  },
+  "mainJAL.json": {
+   "bytes": 3748,
+   "raw_sha256": "6f0ca3e6e67389370a0b1cbfd1200cf81c8f431c00c023b57c8cc969246e77d6",
+   "semantic_sha256": "ec4fdca7771e99740d56598a5136bd734151bc06a74f159e615cac437b816c0e"
+  },
+  "mainLUI.json": {
+   "bytes": 1080,
+   "raw_sha256": "7dbdb7871c5d4593cb4bcf586dbea2fdf21ddaa527df31621aae2c4b876bd365",
+   "semantic_sha256": "8355b665afca7940a5bbeacb0152d9c2b14e16641fe10502da8ea5b4b3da1e4f"
+  },
+  "mainSW.json": {
+   "bytes": 355,
+   "raw_sha256": "ab632655cb527bd428f02dcc0c2aba5fdcc530265a7dc81f487cf95cd44f774b",
+   "semantic_sha256": "78b540cca87c4bb4a754f9dea080d10d605424c8df50a420449bad3d50582ab4"
+  }
+ },
+ "flags": [
+  "-e",
+  "--trace-depth",
+  "6"
+ ],
+ "program": "sw/basic-asm",
+ "registers": [
+  {
+   "hart": 0,
+   "pc": 65700,
+   "x0": 0,
+   "x1": 0,
+   "x10": 0,
+   "x11": 100,
+   "x12": 3825,
+   "x13": 0,
+   "x14": 0,
+   "x15": 0,
+   "x16": 0,
+   "x17": 93,
+   "x18": 0,
+   "x19": 0,
+   "x2": 33554428,
+   "x20": 0,
+   "x21": 0,
+   "x22": 0,
+   "x23": 0,
+   "x24": 0,
+   "x25": 0,
+   "x26": 0,
+   "x27": 0,
+   "x28": 0,
+   "x29": 0,
+   "x3": 0,
+   "x30": 0,
+   "x31": 0,
+   "x4": 0,
+   "x5": 33619968,
+   "x6": 0,
+   "x7": 0,
+   "x8": 0,
+   "x9": 0
+  }
+ ],
+ "vp": "tiny32-vp"
+}

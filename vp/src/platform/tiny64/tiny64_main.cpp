@@ -26,8 +26,17 @@ struct TinyOptions : public Options {
 public:
 	typedef unsigned int addr_t;
 
-	addr_t mem_size = 1024u * 1024u * 128u;  // 128 MB ram, to place it before the CLINT and run the base examples (assume
-	                                     // memory start at zero) without modifications
+	// 32 MB of ram, which ends just below the CLINT at 0x02000000.
+	//
+	// The size is what keeps memory out of the CLINT and the syscall region. The bus answers
+	// with the first port whose range contains an address and memory is the first port, so a
+	// larger range hides both peripherals and a program that waits on mtime never wakes up.
+	// The CLINT cannot move instead: programs address it at 0x02000000, which is where the
+	// RISC-V platforms put it.
+	//
+	// A workload that needs more, such as a MLPerf Tiny model, raises it with --memory-size and
+	// gives up the timer and the syscall region.
+	addr_t mem_size = 1024u * 1024u * 32u; //running larger workloads like ML/NN inference will likely need more memory. 
 	addr_t mem_start_addr = 0x00000000;
 	addr_t mem_end_addr = mem_start_addr + mem_size - 1;
 	addr_t clint_start_addr = 0x02000000;

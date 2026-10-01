@@ -48,9 +48,13 @@ void export_dot(const TraceReport &report) {
 
 	// one dot file per opcode, named after the tree's root instruction
 	for (InstructionNode &tree : report.trees) {
-		std::ofstream output(report.config.output_directory +
-		                     std::string(Opcode::mappingStr[tree.instruction]) + hart_suffix(report.config) +
-		                     std::string(".dot"));
+		std::ofstream output;
+		if (!open_export_file(output, report.config.output_directory +
+		                                  std::string(Opcode::mappingStr[tree.instruction]) +
+		                                  hart_suffix(report.config) + std::string(".dot"))) {
+			std::cout.rdbuf(cout_save);
+			return;
+		}
 		output << "// " << std::time(0) << std::endl;
 		std::cout.rdbuf(output.rdbuf());
 
@@ -61,11 +65,13 @@ void export_dot(const TraceReport &report) {
 		std::cout << "}" << std::endl;
 	}
 
-	std::ofstream memory_map(report.config.output_directory + std::string("memory_map") + hart_suffix(report.config) +
-	                          std::string(".md"));
-	memory_map << "// " << std::time(0) << std::endl;
-	std::cout.rdbuf(memory_map.rdbuf());
-	write_memory_map(report.memory_accesses);
+	std::ofstream memory_map;
+	if (open_export_file(memory_map, report.config.output_directory + std::string("memory_map") +
+	                                     hart_suffix(report.config) + std::string(".md"))) {
+		memory_map << "// " << std::time(0) << std::endl;
+		std::cout.rdbuf(memory_map.rdbuf());
+		write_memory_map(report.memory_accesses);
+	}
 
 	std::cout.rdbuf(cout_save);
 	std::cout << "restored cout" << std::endl;

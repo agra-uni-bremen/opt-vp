@@ -17,6 +17,15 @@
 // The three functions are defined here rather than in the .cpp. They run once
 // per simulated instruction, which is hundreds of millions of times per run.
 
+// Build the VP with -DNO_EXECUTION_TRACING to leave the integration out of the core
+// altogether. `TRACING_COMPILED_IN` is what the core tests; it folds the runtime check away,
+// so nothing of the tracer is left in the executed code.
+#ifdef NO_EXECUTION_TRACING
+#define TRACING_COMPILED_IN false
+#else
+#define TRACING_COMPILED_IN true
+#endif
+
 #include "trace/config.h"
 #include "trace/trace.h"
 
@@ -44,6 +53,24 @@ class Tracer {
 	}
 
 	// ------------------------------------------------------------------ hot path
+
+	/**
+	 * Whether to record anything. The core tests this before every piece of tracing work, so
+	 * `--no-trace` costs one predictable branch per instruction (about 0.3% overhead compared to compile time macros, which I think is a reasonable price for the flexibility).
+	 */
+	bool enabled() const {
+		return TRACING_COMPILED_IN && enabled_;
+	}
+
+	/**
+	 * Whether the core has to keep the map of every address it touched.
+	 *
+	 * Only the dot export reads it, and building it is an ordered map insert on every load and
+	 * every store.
+	 */
+	bool records_memory_map() const {
+		return TRACING_COMPILED_IN && records_memory_map_;
+	}
 
 	/**
 	 * Insert the sequence that ends at the slot about to be overwritten.
@@ -121,4 +148,6 @@ class Tracer {
 	//! The same trees indexed by their root opcode. Null until an opcode occurs.
 	std::array<InstructionNode *, Opcode::NUMBER_OF_INSTRUCTIONS> roots_{};
 	uint8_t index_ = 0;
+	bool enabled_ = true;
+	bool records_memory_map_ = false;
 };

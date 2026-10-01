@@ -1,77 +1,136 @@
 {
-  "comment": [
-    "Cases for tests/trace/check.py. Each one runs a program under a VP with a fixed set of",
-    "flags and compares the resulting trace against reference/<name>.json.",
-    "",
-    "Every case runs at --trace-depth 6.",
-    "",
-    "A case with \"ci\": false is left out by --ci. It needs something the CI image does not",
-    "have (cross compiler with a C library)."
-  ],
-  "cases": [
-    {
-      "name": "minimal",
-      "comment": "Five instructions. The smallest case that produces a tree at all.",
-      "vp": "tiny32-vp",
-      "program": "sw/trace-test-minimal",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "default",
-      "comment": "The general case: arithmetic, branches and a loop.",
-      "vp": "tiny32-vp",
-      "program": "sw/trace-test-default",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "memory",
-      "comment": "Pins the load and store bookkeeping: access counts, offset sums and the memory dependency edges.",
-      "vp": "tiny32-vp",
-      "program": "sw/trace-test-memory",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "output-dep",
-      "comment": "Pins the output and anti dependency edges, which no other case reaches.",
-      "vp": "tiny32-vp",
-      "program": "sw/trace-test-output-dep",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "prefix",
-      "comment": "Pins the true_weight counting, where overlapping windows sharing a prefix must not be counted twice.",
-      "vp": "tiny32-vp",
-      "program": "sw/trace-test-prefix",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "basic-c",
-      "comment": "A compiled C program rather than hand written assembly, so the instruction mix is realistic. Its array initializers make the compiler emit memcpy and memset, so unlike the other cases it needs a cross compiler with a C library",
-      "ci": false,
-      "vp": "tiny32-vp",
-      "program": "sw/basic-c",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "depth-4",
-      "comment": "A second depth. Depth changes which windows exist, so running two depths catches a change that only shows up at one of them.",
-      "vp": "tiny32-vp",
-      "program": "sw/trace-test-default",
-      "flags": ["-e", "--trace-depth", "4"]
-    },
-    {
-      "name": "basic-platform",
-      "comment": "The basic platform rather than tiny32. It has peripherals and a different memory map.",
-      "vp": "riscv-vp",
-      "program": "sw/trace-test-default",
-      "flags": ["-e", "--trace-depth", "6"]
-    },
-    {
-      "name": "rv64",
-      "comment": "The 64 bit ISS on the same program source, so the two architectures cannot drift apart unnoticed.",
-      "vp": "tiny64-vp",
-      "program": "sw/trace-test-minimal-rv64",
-      "flags": ["-e", "--trace-depth", "6"]
-    }
-  ]
+ "comment": [
+  "Cases for tests/trace/check.py. Each one runs a program under a VP with a fixed set of",
+  "flags and compares the resulting trace against reference/<name>.json.",
+  "",
+  "Every case runs at --trace-depth 6.",
+  "",
+  "A case with \"ci\": false is left out by --ci. It needs something the CI image does not",
+  "have (cross compiler with a C library)."
+ ],
+ "cases": [
+  {
+   "name": "minimal",
+   "comment": "Five instructions. The smallest case that produces a tree at all.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-minimal",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "default",
+   "comment": "The general case: arithmetic, branches and a loop.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-default",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "memory",
+   "comment": "Pins the load and store bookkeeping: access counts, offset sums and the memory dependency edges.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-memory",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "output-dep",
+   "comment": "Pins the output and anti dependency edges, which no other case reaches.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-output-dep",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "prefix",
+   "comment": "Pins the true_weight counting, where overlapping windows sharing a prefix must not be counted twice.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-prefix",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "basic-c",
+   "comment": "A compiled C program rather than hand written assembly, so the instruction mix is realistic. Its array initializers make the compiler emit memcpy and memset, so unlike the other cases it needs a cross compiler with a C library",
+   "ci": false,
+   "vp": "tiny32-vp",
+   "program": "sw/basic-c",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "depth-4",
+   "comment": "A second depth. Depth changes which windows exist, so running two depths catches a change that only shows up at one of them.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-default",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "4"
+   ]
+  },
+  {
+   "name": "basic-platform",
+   "comment": "The basic platform rather than tiny32. It has peripherals and a different memory map.",
+   "vp": "riscv-vp",
+   "program": "sw/trace-test-default",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "rv64",
+   "comment": "The 64 bit ISS on the same program source, so the two architectures cannot drift apart unnoticed.",
+   "vp": "tiny64-vp",
+   "program": "sw/trace-test-minimal-rv64",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  },
+  {
+   "name": "no-trace",
+   "comment": "The same program as basic-c with --no-trace. It writes no file, so the counters and the register file are the check: running without recording must not change what the program does.",
+   "vp": "tiny32-vp",
+   "program": "sw/basic-c",
+   "writes_files": false,
+   "ci": false,
+   "flags": [
+    "-e",
+    "--no-trace"
+   ]
+  },
+  {
+   "name": "clint",
+   "comment": "A program that reaches the CLINT and the syscall region. Both sat inside the memory range on tiny32 until 2026-09-29, and the bus answers with the first port that contains an address, so memory hid them and this program never terminated. It runs in 20 ms; if it hangs, the memory map overlaps a peripheral again.",
+   "vp": "tiny32-vp",
+   "program": "sw/basic-asm",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ]
+  }
+ ]
 }

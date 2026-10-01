@@ -115,6 +115,11 @@ produces the same trace with it as without. A switch given after it wins, so
 Direct memory access is on by default and is worth about 30 percent. `--no-dmi` turns it off,
 which is only needed when something has to observe the core's memory traffic on the bus.
 
+`--no-trace` runs the VP as a plain simulator: nothing is recorded and every export is empty.
+Recording costs about five times the simulation, so this is 80 percent faster. The switch that
+decides it costs 0.2 percent when tracing is on, so a VP built with the tracing in it runs a
+benchmark as fast as one built without it.
+
 ```bash
 ./vp/build/bin/tiny32-vp --intercept-syscalls "$input_file" --output-file "$out_dir/" -e --performance-mode
 ```
@@ -146,7 +151,7 @@ task's decisions and progress.
 ### JITR and execution sequence trees
 
 One JSON file per *root instruction* (`md5sumADD.json` holds every k-bounded window/sequence starting
-with `ADD`). Each node is one dynamically executed instruction; a root→node path is a
+with `ADD`). Each node is one dynamically executed instruction; a root->node path is a
 contiguous executed instruction window. The tree structure is similar to tries/prefix trees. 
 
 | Field | Meaning |
@@ -155,10 +160,10 @@ contiguous executed instruction window. The tree structure is similar to tries/p
 | `type` | Numeric instruction class from the VP |
 | `weight` | Occurrences of this window during execution |
 | `true_weight` | Non-overlapping occurrence count (the coverage numerator) |
-| `register_sets` | `{"<pc>": {count, rd, rs1, rs2, predecessors}}` — **the PC is the key, a decimal string**. `predecessors` is `{"<pc>": count}` for the instruction that ran immediately before, summing to `count` |
+| `register_sets` | `{"<pc>": {count, rd, rs1, rs2, predecessors}}` - **the PC is the key, a decimal string**. `predecessors` is `{"<pc>": count}` for the instruction that ran immediately before, summing to `count` |
 | `dependencies_true/anti/output` | *Backward offsets* along the path (`1` = parent) |
 | `inputs` / `outputs` | Union of source/destination register numbers |
-| `parameters` | `[[pc, [[value, count], ...]], ...]` — the decoded immediate of every instruction carrying one, signed 64-bit, pc-ordered; branches and jumps record their **target PC**. Here PCs are JSON *numbers*. |
+| `parameters` | `[[pc, [[value, count], ...]], ...]` - the decoded immediate of every instruction carrying one, signed 64-bit, pc-ordered; branches and jumps record their **target PC**. Here PCs are JSON *numbers*. |
 | `BranchOutcomes` | `{"<pc>": {offset, taken, not_taken}}`. `Direction`/`offsets` summarise taken executions only and exclude `JALR` |
 | `format_version` | `"1.2"`, on the root node only |
 | `children` | Nested nodes |

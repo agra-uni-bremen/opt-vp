@@ -92,15 +92,8 @@ struct GenericElfLoader {
 			if (!(addr >= offset && addr < (offset + size)))
 				continue;
 
-			if (addr < offset) {
-				std::cerr << "[elf_loader] ";
-				std::cerr << "Offset overlaps into section:" << std::endl;
-				std::cerr << "\t0x" << std::hex << +addr << " < " << +offset << std::endl;
-				print_phdr(std::cerr, *p, 2);
-				throw load_executable_exception();
-			}
-
-			if (addr + p->p_memsz >= offset + size) {
+			//A segment ending on the last byte of the memory fits, so the test is > and not >=.
+			if (addr + p->p_memsz > offset + size) {
 				std::cerr << "[elf_loader] ";
 				std::cerr << "Section does not fit in target memory" << std::endl;
 				std::cerr << "\t0x" << std::hex << +addr << " + size 0x" << +p->p_memsz;
@@ -131,9 +124,8 @@ struct GenericElfLoader {
 	}
 
 	addr_t get_heap_addr() {
-		// return first 8 byte aligned address after the memory image
-		auto s = get_memory_end();
-		return s + s % 8;
+		// first 8 byte aligned address at or after the end of the memory image
+		return (get_memory_end() + 7) & ~addr_t(7);
 	}
 
 	addr_t get_entrypoint() {

@@ -23,6 +23,8 @@ public:
 	float similarity_threshold = 0.2f;
 	//effective instruction tree depth, 0 = use the depth the VP was compiled with
 	unsigned int instruction_tree_depth = 0;
+	//--no-trace: run the core without recording anything, which leaves every export empty
+	bool no_trace = false;
 	//dot only: omit branches below this share of their tree's weight, 0 draws every branch
 	float graph_branch_threshold = 0.05f;
 	std::string scoring_library = "./vp/build/lib/libfunctions.so";

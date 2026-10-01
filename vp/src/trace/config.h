@@ -1,6 +1,6 @@
 #pragma once
 
-// What to record and what to write out. Set once, from the command line, before the
+// What to trace and what to export out. Set once, from the command line, before the
 // simulation starts.
 //
 // Every platform builds one of these with `Options::trace_config()` and hands it to its
@@ -12,16 +12,23 @@
 
 struct TraceConfig {
 	/**
-	 * Length of the longest window the tracer records, which is also the depth of the trees.
+	 * Record execution at all. False runs the core without the tracing integration: no
+	 * sequences are built, no per instruction information is collected, and every export is
+	 * empty. Use `--no-trace` to disable tracing.
+	 */
+	bool enabled = true;
+
+	/**
+	 * Length of the longest sequence the tracer records, which is also the depth of the trees.
 	 *
 	 * Zero keeps the depth the VP was compiled with, `INSTRUCTION_TREE_DEPTH`. A larger value
-	 * is clamped to it, because the nodes hold fixed size arrays of that length. Tree depth has a large impact on performance.
+	 * is clamped to it. Tree depth has a large impact on performance.
 	 */
 	unsigned int depth = 0;
 
-	//! One JSON file per tree following the JITR schema. The export the RETrace frontend reads.
+	//! One JSON file per tree following the JITR schema. 
 	bool write_trees = false;
-	//! One dot graph per tree, plus a memory map. Dot graph rendering  is generally replaced by the trace explorer in RETrace
+	//! One dot graph per tree, plus a memory map. Dot graph rendering  is generally replaced by the trace explorer
 	bool write_dot = false;
 	/**
 	 * Omit any branch of a dot graph carrying less than this share of its tree's weight.
@@ -36,7 +43,7 @@ struct TraceConfig {
 	bool write_coverage_csv = false;
 
 	/**
-	 * Where the coverage csv goes. A relative path is taken relative to `output_directory`,
+	 * Output file. A relative path is taken relative to `output_directory`,
 	 * an absolute one as given.
 	 */
 	std::string coverage_csv_file;
@@ -55,11 +62,11 @@ struct TraceConfig {
 
 	/**
 	 * Directory every export is written into, with a trailing separator, or empty to write to
-	 * standard output. Use `set_output_directory`, which appends the separator: filenames are
-	 * built by concatenation, so a missing one silently writes into the parent directory.
+	 * standard output. Use `set_output_directory`, which appends the separator. 
+	 * TODO: filenames are built by concatenation, so a missing one silently writes into the parent directory.
 	 */
 	std::string output_directory;
-	//! Path of the simulated program. Its basename goes into every exported filename.
+	//! Path of the simulated program. The basename goes into every exported filename.
 	std::string input_program;
 	//! Distinguishes the files of one core from another's on a multicore platform.
 	unsigned int hart_id = 0;

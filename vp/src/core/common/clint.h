@@ -108,9 +108,13 @@ struct CLINT : public clint_if, public sc_core::sc_module {
 	}
 
 	bool pre_read_mtime(RegisterRange::ReadInfo t) {
-		sc_core::sc_time now = sc_core::sc_time_stamp() + t.delay;
-
-		mtime.write(now.value() / scaler);
+		//t.delay is the reading core's offset inside the tlm quantum, which is the reason
+		//update_and_get_mtime refuses to move mtime backwards. Apply the same rule here, or two
+		//cores reading at different points in their quantums make mtime go back and forth.
+		uint64_t now = (sc_core::sc_time_stamp() + t.delay).value() / scaler;
+		if (now > mtime) {
+			mtime.write(now);
+		}
 
 		return true;
 	}

@@ -20,7 +20,10 @@ void export_csv(const TraceReport &report) {
 	std::cout << "writing csv files to directory " << report.config.output_directory << std::endl;
 	std::string single_output_filename = report.config.output_directory + std::string("Execution_Trees_") +
 	                                     application_name + hart_suffix(report.config) + std::string(".csv");
-	std::ofstream output(single_output_filename);
+	std::ofstream output;
+	if (!open_export_file(output, single_output_filename)) {
+		return;
+	}
 	std::cout.rdbuf(output.rdbuf());
 
 	std::cout << "id;"
@@ -95,9 +98,8 @@ void export_coverage_csv(const TraceReport &report, const std::vector<Path> &seq
 		output_path = report.config.output_directory + output_path;
 	}
 
-	std::ofstream output(output_path);
-	if (!output.is_open()) {
-		std::cerr << "[ERROR] Could not open coverage csv output: " << output_path << std::endl;
+	std::ofstream output;
+	if (!open_export_file(output, output_path)) {
 		return;
 	}
 

@@ -45,13 +45,13 @@ struct SimpleMemory : public sc_core::sc_module, public load_if {
 		write_data(addr, (const uint8_t *)f.data(), f.size());
 	}
 
-	void write_data(unsigned addr, const uint8_t *src, unsigned num_bytes) {
+	void write_data(uint64_t addr, const uint8_t *src, unsigned num_bytes) {
 		assert(addr + num_bytes <= size);
 
 		memcpy(data + addr, src, num_bytes);
 	}
 
-	void read_data(unsigned addr, uint8_t *dst, unsigned num_bytes) {
+	void read_data(uint64_t addr, uint8_t *dst, unsigned num_bytes) {
 		assert(addr + num_bytes <= size);
 
 		memcpy(dst, data + addr, num_bytes);
@@ -64,13 +64,23 @@ struct SimpleMemory : public sc_core::sc_module, public load_if {
 
 	unsigned transport_dbg(tlm::tlm_generic_payload &trans) {
 		tlm::tlm_command cmd = trans.get_command();
-		unsigned addr = trans.get_address();
+		uint64_t addr = trans.get_address();
 		auto *ptr = trans.get_data_ptr();
 		auto len = trans.get_data_length();
 
-		assert(addr < size);
+		//checked here rather than by an assert, because a Release build has no asserts and an
+		//access past the end would read or write the simulator's own memory. The bus path is a
+		//full tlm transaction, so the comparison costs nothing next to it.
+		if (addr + len > size) {
+			trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+			return 0;
+		}
 
 		if (cmd == tlm::TLM_WRITE_COMMAND) {
+			if (read_only) {
+				trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
+				return 0;
+			}
 			write_data(addr, ptr, len);
 		} else if (cmd == tlm::TLM_READ_COMMAND) {
 			read_data(addr, ptr, len);

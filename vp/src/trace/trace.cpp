@@ -1,7 +1,38 @@
 #include "trace.h"
 
+#include "trace/path_node.h"
+
 #include <bitset>
 #include "lib/json/single_include/nlohmann/json.hpp"
+
+nlohmann::ordered_json MemoryNode::memory_to_json() {
+	nlohmann::ordered_json json;
+	json["LS"] = is_store;
+	json["Accesses"] = memory_accesses;
+	json["OffsetSum"] = access_offset_sum;
+	if (peripheral_access_counts.size() > 0) {
+		json["Peripherals"] = peripheral_by_address;
+		json["PeripheralAccessCounts"] = peripheral_access_counts;
+	}
+	return json;
+}
+
+nlohmann::ordered_json BranchNode::branch_to_json() {
+	nlohmann::ordered_json json;
+	json["Direction"] = (is_backward_jump * 1) + (is_forward_jump * 2);
+	json["offsets"] = relative_offsets;
+	#ifdef trace_branch_outcomes
+	nlohmann::json jsonOutcomes = nlohmann::json::object();
+	for (const auto &entry : branch_outcomes) {
+		jsonOutcomes[std::to_string(entry.first)] = {
+			{"offset", entry.second.offset},
+			{"taken", entry.second.taken},
+			{"not_taken", entry.second.not_taken}};
+	}
+	json["BranchOutcomes"] = jsonOutcomes;
+	#endif
+	return json;
+}
 
 using namespace Opcode;
 

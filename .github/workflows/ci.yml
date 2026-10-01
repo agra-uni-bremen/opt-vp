@@ -39,7 +39,7 @@ jobs:
         run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release
 
       - name: build
-        run: cmake --build vp/build --target essential tiny64-vp --parallel "$(nproc)"
+        run: cmake --build vp/build --target essential --parallel "$(nproc)"
 
       # These programs are assembly in the base ISA and link with -nostdlib, so they need no
       # C library. Cases whose program does need one are marked "ci": false in cases.json and
@@ -65,3 +65,26 @@ jobs:
           name: trace-output
           path: out/trace-check
           if-no-files-found: ignore
+
+  # The trace job builds `essential` only, which is five of the fifteen binaries. This job
+  # builds the rest so that a change to a shared header is not found weeks later by whoever
+  # next needs hifive, hwitl, test32, a multicore board or the scoring library. It runs no
+  # program, because the reference check above already covers behaviour.
+  build-all:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libboost-all-dev
+
+      - name: configure
+        run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: build every target
+        run: cmake --build vp/build --parallel "$(nproc)"

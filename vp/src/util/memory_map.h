@@ -194,11 +194,13 @@ struct ArrayView {
 	const T *begin() const {
 		return &ptr[0];
 	}
+	//one past the last element, so a range for reaches every entry. Returning the last element
+	//meant `for (auto &x : interrupt_priorities)` in the fe310 plic never clamped the last one.
 	T *end() {
-		return &ptr[size - 1];
+		return &ptr[size];
 	}
 	const T *end() const {
-		return &ptr[size - 1];
+		return &ptr[size];
 	}
 };
 

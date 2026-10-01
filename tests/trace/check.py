@@ -66,9 +66,15 @@ def run_case(case):
             + "\n".join("  " + line for line in result["stdout"].splitlines()[-12:]))
 
     entries = vpbench.manifest(out_dir)
-    if not entries:
+    #a case with "writes_files": false asks the VP not to export anything, which is what
+    #--no-trace does. There the counters and the register file are the whole check.
+    if not entries and case.get("writes_files", True):
         raise vpbench.VpError(
             f"{case['name']}: the VP wrote nothing to {out_dir}. Did the flags change?")
+    if entries and not case.get("writes_files", True):
+        raise vpbench.VpError(
+            f"{case['name']}: the case says it writes no file, but the VP wrote "
+            f"{len(entries)} of them to {out_dir}")
     return entries, result, out_dir
 
 

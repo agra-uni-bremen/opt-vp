@@ -1,5 +1,7 @@
 #include "trace/export.h"
 
+#include "trace/path_node.h"
+
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -57,7 +59,10 @@ void export_sequences(const TraceReport &report,
 	std::cout << "writing json to directory " << report.config.output_directory << std::endl;
 	std::cout << "Sequence file: " << single_output_filename << std::endl;
 
-	std::ofstream output(single_output_filename);
+	std::ofstream output;
+	if (!open_export_file(output, single_output_filename)) {
+		return;
+	}
 	output << top_level_json.dump(JSON_INDENT) << std::endl;
 }
 
@@ -75,7 +80,10 @@ void export_trees(const TraceReport &report) {
 		tree_json["format_version"] = TRACE_FORMAT_VERSION;
 		tree_json.update(tree.to_json());
 
-		std::ofstream output(single_output_filename);
+		std::ofstream output;
+		if (!open_export_file(output, single_output_filename)) {
+			return;
+		}
 		output << tree_json.dump(JSON_INDENT) << std::endl;
 		printf(".");
 	}

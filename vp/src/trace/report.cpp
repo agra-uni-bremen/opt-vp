@@ -2,6 +2,7 @@
 
 #include "trace/analysis.h"
 #include "trace/export.h"
+#include "trace/path_node.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -53,6 +54,7 @@ size_t count_unused_instructions(std::list<InstructionNode> &trees) {
  *
  * The sub sequence and variant work is the expensive part and runs only for the sequence
  * export, which is what `report.config.write_sequences` guards.
+ * Since this only runs once after the simulation, it is not really a performance concern.
  */
 void collect_sequence_nodes(TraceReport &report, const std::vector<Path> &sequences,
                             const ScoreFunction &score,
@@ -148,7 +150,28 @@ std::string hart_suffix(const TraceConfig &config) {
 	return config.hart_id == 0 ? std::string() : "-hart" + std::to_string(config.hart_id);
 }
 
+bool open_export_file(std::ofstream &output, const std::string &path) {
+	output.open(path);
+	if (!output.is_open()) {
+		std::cerr << "[ERROR] could not write " << path
+		          << ". The output directory has to exist. The VP does not create it." << std::endl;
+		return false;
+	}
+	return true;
+}
+
 void run_trace_report(TraceReport &report) {
+	if (!report.config.enabled) {
+		//--no-trace recorded nothing, so there is no tree to analyse and nothing to export.
+		if (report.config.writes_any_file()) {
+			std::cout << "[trace] WARNING: --no-trace was given, so no export is written" << std::endl;
+		}
+		std::cout << "tracing off (--no-trace)" << std::endl;
+		std::cout << "total instructions: " << report.retired_instructions << std::endl;
+		std::cout << "total cycles: " << report.cycles << std::endl;
+		return;
+	}
+
 	std::cout << "execution statistics: (" << report.trees.size() << " Trees)" << std::endl;
 
 	if (report.config.write_dot) {
@@ -184,7 +207,8 @@ void run_trace_report(TraceReport &report) {
 		std::vector<Path> sequences_sorted = sorted_by_score_descending(discovered_sequences, score);
 		printf("\n ----------------------------\n| Best Sequences (Coverage) |\n ----------------------------\n");
 		for (size_t idx = 0; idx < std::min<size_t>(4, sequences_sorted.size()); ++idx) {
-			sequences_sorted[idx].show();
+			//print with the function the ranking used
+			sequences_sorted[idx].show("", score);
 		}
 	}
 
@@ -196,13 +220,13 @@ void run_trace_report(TraceReport &report) {
 		export_coverage_csv(report, filtered, score);
 	}
 
-	std::vector<std::vector<PathNode>> sequence_nodes;
-	std::vector<std::vector<std::vector<PathNode>>> sub_sequence_nodes;
-	std::vector<std::vector<std::vector<PathNode>>> variant_nodes;
-	collect_sequence_nodes(report, discovered_sequences, score, sequence_nodes, sub_sequence_nodes,
-	                       variant_nodes);
-
+	//only the sequences export reads these, and building them walks every tree again
 	if (report.config.write_sequences) {
+		std::vector<std::vector<PathNode>> sequence_nodes;
+		std::vector<std::vector<std::vector<PathNode>>> sub_sequence_nodes;
+		std::vector<std::vector<std::vector<PathNode>>> variant_nodes;
+		collect_sequence_nodes(report, discovered_sequences, score, sequence_nodes, sub_sequence_nodes,
+		                       variant_nodes);
 		export_sequences(report, sequence_nodes, sub_sequence_nodes, variant_nodes);
 	}
 
@@ -213,7 +237,10 @@ void run_trace_report(TraceReport &report) {
 		       "the tree bound.\n");
 	} else {
 		const Path &best = discovered_sequences.back();
-		total_percent = static_cast<float>(best.minimum_weight) * static_cast<float>(best.length) /
+		//true_weight counts non overlapping occurrences.
+		//minimum_weight counts every window, so it double counts a sequence that overlaps itself:
+		//using normal weight results in matmult-int reporting 79.5% coverage vs 39.8% actual coverage. 
+		total_percent = static_cast<float>(best.true_weight) * static_cast<float>(best.length) /
 		                static_cast<float>(report.retired_instructions);
 		std::cout << "inverse dependency score " << best.inverse_dependency_score << std::endl;
 		std::cout << "partially normalized potential " << best.get_normalized_score() << std::endl;

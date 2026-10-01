@@ -41,6 +41,7 @@ Options::Options(void) {
 		("coverage-csv", po::value<std::string>(&coverage_csv_file)->implicit_value("sequences.csv"), "export top sequences as csv")
 		("top-n", po::value<unsigned int>(&top_n)->default_value(10), "top N sequences to export")
 		("trace-depth", po::value<unsigned int>(&instruction_tree_depth), "length of the traced instruction sequences (default and maximum: the compiled INSTRUCTION_TREE_DEPTH)")
+		("no-trace", po::bool_switch(&no_trace), "do not record execution sequences, which makes every export empty. Use the VP as a plain simulator")
 		("similarity", po::value<float>(&similarity_threshold)->default_value(0.2f), "similarity threshold for filtering top sequences")
 		//accepted but inert. It was a prototype for recording extra, expensive attributes for
 		//sequences picked out by an earlier run, identified by their path hash. Nothing reads it.
@@ -139,6 +140,7 @@ void Options::parse(int argc, char **argv) {
 
 TraceConfig Options::trace_config(unsigned int hart_id) const {
 	TraceConfig config;
+	config.enabled = !no_trace;
 	config.depth = instruction_tree_depth;
 	config.write_trees = output_full_export;
 	config.write_dot = output_as_dot;
@@ -165,6 +167,7 @@ void Options::printValues(std::ostream& os) const {
 	os << "debug_port: " << debug_port << std::endl;
 	os << "trace_mode: " << trace_mode << std::endl;
 	os << "trace_depth: " << instruction_tree_depth << std::endl;
+	os << "no_trace: " << no_trace << std::endl;
 	os << "tlm_global_quantum: " << tlm_global_quantum << std::endl;
 	os << "performance_mode: " << performance_mode << std::endl;
 	os << "use_instr_dmi: " << use_instr_dmi << std::endl;

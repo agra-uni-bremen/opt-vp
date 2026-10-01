@@ -164,6 +164,16 @@ ISS::ISS(uint64_t hart_id, bool use_E_base_isa) : systemc_name("Core-" + std::to
 void ISS::exec_step() {
 	assert(((pc & ~pc_alignment_mask()) == 0) && "misaligned instruction");
 
+	//Open the step before anything that can raise a trap. 
+	//The slot about to be overwritten ends the oldest window, so that window is inserted first. 
+	//Everything from here to the end of this function can throw, and `run_step` therefore calls `discard_trapped_step`. 
+	//Opening it later would leave a trap during the fetch with a step that is closed but was never opened.
+	uint64_t cycles_diff = 0;
+	if (tracer.enabled()) {
+		cycles_diff = get_current_cycles() - prev_cycles;
+		tracer.begin_step();
+	}
+
 	try {
 		uint32_t mem_word = instr_mem->load_instr(pc);
 		instr = Instruction(mem_word);
@@ -195,11 +205,6 @@ void ISS::exec_step() {
 				   Opcode::mappingStr[step.last_executed_instruction]);
 		}
 	}
-
-	uint64_t cycles_diff = get_current_cycles() - prev_cycles;
-
-	//the slot about to be overwritten ends the oldest window, so insert that window first
-	tracer.begin_step();
 
 	if (trace) {
 		printf("core %2lu: prv %1x: pc %8lx: %s ", csrs.mhartid.reg, prv, last_pc, Opcode::mappingStr[op]);
@@ -335,14 +340,23 @@ void ISS::exec_step() {
 
 		case Opcode::SLLI:
 			regs[instr.rd()] = regs[instr.rs1()] << instr.shamt();
+			#ifdef trace_parameter
+			last_parameter = instr.shamt();
+			#endif
 			break;
 
 		case Opcode::SRLI:
-			regs[instr.rd()] = ((uint64_t)regs[instr.rs1()]) >> instr.shamt();
+			regs[instr.rd()] = ((uint32_t)regs[instr.rs1()]) >> instr.shamt();
+			#ifdef trace_parameter
+			last_parameter = instr.shamt();
+			#endif
 			break;
 
 		case Opcode::SRAI:
 			regs[instr.rd()] = regs[instr.rs1()] >> instr.shamt();
+			#ifdef trace_parameter
+			last_parameter = instr.shamt();
+			#endif
 			break;
 
 		case Opcode::LUI:
@@ -748,6 +762,7 @@ void ISS::exec_step() {
 		} break;
 
 		case Opcode::DIVU: {
+            REQUIRE_ISA(M_ISA_EXT);
 			auto a = regs[instr.rs1()];
 			auto b = regs[instr.rs2()];
 			if (b == 0) {
@@ -758,6 +773,7 @@ void ISS::exec_step() {
 		} break;
 
 		case Opcode::REM: {
+            REQUIRE_ISA(M_ISA_EXT);
 			auto a = regs[instr.rs1()];
 			auto b = regs[instr.rs2()];
 			if (b == 0) {
@@ -770,6 +786,7 @@ void ISS::exec_step() {
 		} break;
 
 		case Opcode::REMU: {
+            REQUIRE_ISA(M_ISA_EXT);
 			auto a = regs[instr.rs1()];
 			auto b = regs[instr.rs2()];
 			if (b == 0) {
@@ -1449,7 +1466,14 @@ void ISS::exec_step() {
 			break;
 
 		default:
+			printf("ERROR: unsupported instruction[" BYTE_TO_BINARY_PATTERN "] at address %x", 
+              BYTE_TO_BINARY(instr.opcode()),last_pc);
 			throw std::runtime_error("unknown opcode");
+	}
+
+	//nothing below this point runs without tracing
+	if (!tracer.enabled()) {
+		return;
 	}
 
 	#ifdef trace_parameter_immediates
@@ -1459,7 +1483,9 @@ void ISS::exec_step() {
 	}
 	#endif
 
-	//record what this instruction did, for the windows that end at it
+	//---------------------------------------------------------------------------------
+    //                     save instruction info of last execution
+    //---------------------------------------------------------------------------------
 	ExecutionInfo &step = tracer.step();
 	step.last_executed_instruction = op;
 	step.last_cycles = cycles_diff;
@@ -2222,6 +2248,26 @@ void ISS::performance_and_sync_update(Opcode::Mapping executed_op) {
 	}
 }
 
+/**
+ * Drop the step of an instruction that raised a trap.
+ *
+ * `exec_step` opens a step and throws out of the middle of it, so it never fills the ring
+ * buffer slot and never moves on to the next one. The slot still holds the instruction from
+ * `trace_depth` steps ago, whose window `begin_step` has already inserted, so the next
+ * instruction would insert that same window a second time: a program that trapped ten times
+ * reported one tree root at weight 19 for ten executions of it.
+ *
+ * Marking the slot as unwritten is enough. The next instruction fills it as usual, and the
+ * trapping instruction stays out of the trace, which is what it has always done.
+ */
+void ISS::discard_trapped_step() {
+	if (tracer.enabled()) {
+		tracer.step().last_executed_instruction = Opcode::UNDEF;
+	}
+	last_memory_access = {0, AccessType::NONE};
+	last_memory_peripheral = nullptr;
+}
+
 void ISS::run_step() {
 	assert(regs.read(0) == 0);
 
@@ -2248,6 +2294,8 @@ void ISS::run_step() {
 	} catch (SimulationTrap &e) {
 		if (trace)
 			std::cout << "take trap " << e.reason << ", mtval=" << e.mtval << std::endl;
+		//the throw left exec_step in the middle of a step, so close that step here
+		discard_trapped_step();
 		auto target_mode = prepare_trap(e);
 		switch_to_trap_handler(target_mode);
 	}
@@ -2267,7 +2315,8 @@ void ISS::run_step() {
 }
 
 void ISS::run() {
-	// run a single step until either a breakpoint is hit or the execution terminates
+	// run a single step until either a breakpoint is hit or the execution
+	// terminates
 	do {
 		run_step();
 	} while (status == CoreExecStatus::Runnable);

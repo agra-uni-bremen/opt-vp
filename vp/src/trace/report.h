@@ -10,6 +10,7 @@
 #include "trace/trace.h"
 
 #include <cstdint>
+#include <fstream>
 #include <list>
 #include <string>
 
@@ -51,3 +52,10 @@ std::string program_basename(const std::string &path);
  * each other's files. Empty for hart 0, `-hart<n>` for the rest.
  */
 std::string hart_suffix(const TraceConfig &config);
+
+/**
+ * Open `path` for writing.
+ *
+ * The VP does not create `output_directory`.
+ */
+bool open_export_file(std::ofstream &output, const std::string &path);

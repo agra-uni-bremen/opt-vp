@@ -5,6 +5,7 @@
 #include <tlm_utils/simple_target_socket.h>
 #include <systemc>
 
+#include <iostream>
 #include <map>
 #include <stdexcept>
 #include <memory>
@@ -31,7 +32,9 @@ struct SimpleBus : sc_core::sc_module {
 	std::array<tlm_utils::simple_target_socket<SimpleBus>, NR_OF_INITIATORS> tsocks;
 
 	std::array<tlm_utils::simple_initiator_socket<SimpleBus>, NR_OF_TARGETS> isocks;
-	std::array<PortMapping *, NR_OF_TARGETS> ports;
+	//! One address range per target, assigned by the platform. Null until it is. 
+	//! `decode` reads them without checking, so `end_of_elaboration` reports any that the platform forgot.
+	std::array<PortMapping *, NR_OF_TARGETS> ports{};
 
 	SimpleBus(sc_core::sc_module_name) {
 		for (auto &s : tsocks) {
@@ -46,6 +49,42 @@ struct SimpleBus : sc_core::sc_module {
 				return i;
 		}
 		return -1;
+	}
+
+	/**
+	 * Report a port that an earlier port covers.
+	 *
+	 * `decode` answers with the first port whose range contains the address, so a port that
+	 * overlaps an earlier one is hidden. 
+	 * reads and writes meant for it reach the earlier port instead (nothing fails). 
+	 * On tiny32 the memory port covered the CLINT and the syscall region for years, so a program waiting on
+	 * mtime read memory, saw zero, and waited forever.
+	 *
+	 * SystemC calls this once after the ports are assigned and before the simulation starts.
+	 */
+	void end_of_elaboration() override {
+		for (unsigned later = 0; later < NR_OF_TARGETS; ++later) {
+			if (ports[later] == nullptr) {
+				std::cerr << "[bus] ERROR: port " << later << " of " << NR_OF_TARGETS
+				          << " has no address range, so any access decoded to it crashes" << std::endl;
+				continue;
+			}
+			for (unsigned earlier = 0; earlier < later; ++earlier) {
+				if (ports[earlier] == nullptr) {
+					continue;
+				}
+				if (ports[earlier]->start > ports[later]->end ||
+				    ports[later]->start > ports[earlier]->end) {
+					continue;
+				}
+				std::cerr << "[bus] WARNING: port " << later << " (0x" << std::hex
+				          << ports[later]->start << " to 0x" << ports[later]->end << ") overlaps port "
+				          << std::dec << earlier << " (0x" << std::hex << ports[earlier]->start
+				          << " to 0x" << ports[earlier]->end << std::dec
+				          << "), which is decoded first, so port " << later
+				          << " cannot be reached through the bus" << std::endl;
+			}
+		}
 	}
 
 	void transport(tlm::tlm_generic_payload &trans, sc_core::sc_time &delay) {

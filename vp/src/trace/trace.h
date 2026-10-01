@@ -9,11 +9,16 @@
 
 #include <bitset>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <fstream>
+#include <map>
 #include <new>
+#include <string>
 #include <vector>
 
-#include "lib/json/single_include/nlohmann/json.hpp"
+//only the declarations (a file that includes the tracer should not parse the json library)
+#include "lib/json/single_include/nlohmann/json_fwd.hpp"
 
 //maximum tree depth. Fixed at compile time so nodes can keep static arrays/bitsets.
 //override from the build system with -DINSTRUCTION_TREE_DEPTH=<n>
@@ -22,23 +27,28 @@
 #endif
 //version of the exported trace format, written into every exported tree.
 //bump the minor version when fields are added, the major version when existing fields change meaning
-//1.2: predecessor pcs per register_sets entry, immediates for every instruction that carries one,
+//1.2: predecessor pcs per register_sets entry, immediates for every immediate instruction,
 //     real branch directions/offsets and per pc taken/not-taken counts
 #define TRACE_FORMAT_VERSION "1.2"
 
 #define JSON_INDENT -1
 #define SIMILARITY_ALGORITHM 1 //1 for jaccard, 2 for levenshtein
 #define MAX_VARIANTS 3
-#define PRUNE_THRESHOLD_WEIGHT 0.01 //threshold weight ratio for pruning branches 
+#define PRUNE_THRESHOLD_WEIGHT 0.01 //default threshold weight ratio for pruning branches for the VP analysis. This does not affect anything else
 //no pruning md5 d50 -> 0.356s per function for all trees
 //threshold of 0.03 d50 -> 0.0233s
 //threshold of 0.01 d50 -> 0.0533s 
 
 //phase boundaries as step ids, for the per node phase counters described in InstructionNode
+//feature is not fully implemented 
 #define O_STARTUP 1000
 #define O_BEGINNING 10000
 #define O_MID 3000000
 
+//----------------------------------------------------------------
+//					  Tracing configuration
+// Most of these can be toggled to reduce trace size and speed up tracing
+//-----------------------------------------------------------------
 #define trace_pcs
 #define log_pcs
 // #define debug_register_dependencies
@@ -47,8 +57,8 @@
 #define trace_individual_registers
 #define trace_parameter //trace instruction parameters like shift amount and branch/jump targets
 
-//trace the decoded immediate of every instruction that carries one (ADDI, ANDI, LUI, load/store offsets, ...)
-//this is what allows constant folding of immediates on the analysis side, but it adds one parameter entry
+//trace the decoded immediate of every instruction that carries one (ADDI, ANDI, LUI, load/store offsets, etc.)
+//this allows constant folding of immediates on the analysis side, but it adds one parameter entry
 //per pc for most of the program -> noticeably larger traces. Disable with -DNO_TRACE_PARAMETER_IMMEDIATES
 #ifndef NO_TRACE_PARAMETER_IMMEDIATES
 #define trace_parameter_immediates
@@ -59,7 +69,8 @@
 #endif
 
 //record which pc preceded each register_sets entry in the same dynamic execution.
-//needed to prove (instead of guess) the pc path through a sequence. Disable with -DNO_TRACE_PREDECESSOR_PCS
+//needed to prove (instead of guess) the predecessor when reconstructing the paths during the analysis. Disable with -DNO_TRACE_PREDECESSOR_PCS
+//disabling this will still produce correct results during the analysis, but there is a chance of around 2% that a sequence can not be scheduled optimally. 
 #ifndef NO_TRACE_PREDECESSOR_PCS
 #define trace_predecessor_pcs
 #endif
@@ -72,7 +83,8 @@
 
 //also record parameters on the root node of a tree. Every occurrence of an instruction reaches
 //the root of its tree, so this costs one parameter entry per pc executing that opcode.
-//on by default; -DTRACE_ROOT_PARAMETERS=OFF drops it, which shrinks traces and speeds up tracing
+//on by default, but could be fully reconstructed from the other trace data if disabled.
+//disable with -DTRACE_ROOT_PARAMETERS=OFF, which shrinks traces and speeds up tracing
 #ifdef TRACE_ROOT_PARAMETERS
 #define trace_root_parameters
 #endif
@@ -122,6 +134,7 @@ enum class AccessType {
 
 //! Every address a load or a store touched, mapped to the pc that last wrote it and the pc
 //! that last read it. The dot export writes it out as a memory map.
+// As the dot export is not really used anymore, its somewhat deprecated, but could stll be useful for other purposes. 
 using MemoryAccessMap = std::map<uint64_t, std::tuple<uint64_t, uint64_t>>;
 
 enum class BranchOutcome : uint8_t {
@@ -137,8 +150,9 @@ InstructionType getInstructionType(Opcode::Mapping mapping);
 constexpr int64_t NO_PARAMETER = INT64_MIN;
 
 //decoded immediate of an instruction, or NO_PARAMETER if it does not carry one.
-//branches and jumps are excluded on purpose: their parameter slot holds the actual target pc
+//branches and jumps are excluded on purpose, as their parameter slot holds the actual target pc
 //(see the ISS), and the encoded offset is reported through the branch outcome instead.
+//branch target tracking was implemented way before parameter tracking (and actually required to properly analyze the trace)
 inline int64_t decode_traced_immediate(Opcode::Mapping op, Instruction& instr) {
 	using namespace Opcode;
 	switch (op) {
@@ -167,14 +181,14 @@ inline int64_t decode_traced_immediate(Opcode::Mapping op, Instruction& instr) {
 			return instr.U_imm();
 		default:
 			//R/R4 have no immediate, B is covered by the branch target/outcome,
-			//UNKNOWN covers CSR, FENCE, ECALL, ... where the field is not an immediate
+			//UNKNOWN covers CSR, FENCE, ECALL, etc. where the field is not an immediate
 			return NO_PARAMETER;
 	}
 }
 
 //one entry of the ring buffer of recently executed instructions.
-//every member is initialized: the buffer is only partially filled during the first steps and the
-//code detects that by checking for a zero opcode
+//every member is initialized 
+//the buffer is only partially filled during the first steps (check for a zero opcode)
 struct ExecutionInfo {
 	Opcode::Mapping last_executed_instruction = Opcode::UNDEF;
 	uint64_t last_cycles = 0;
@@ -218,7 +232,7 @@ struct StepInfo {
     int8_t input1; //equal to rs1 if rs1 was not written to by another instruction in the sequence, -1 otherwise
     int8_t input2; 
     int8_t output;
-    //! Position in the window, so also the depth of the node this describes. 0 is the root.
+    //! Position in the window. 0 is the root.
     uint32_t depth;
     uint64_t step;
 	uint64_t cycles;
@@ -236,6 +250,7 @@ struct StepInfo {
 
 class InstructionNode;
 
+//Used for VP side analysis only
 struct Path
 {
 	uint32_t length = 0;
@@ -260,28 +275,21 @@ struct Path
 		sequence_weight, length, inverse_dependency_score, 
 		num_children, inputs, outputs, score_multiplier, score_bonus};
 		float score_result = score_function(params);
-		if(score_result < 0){
-			printf("[ERROR] Score function returned negative score: %f\nweight: %lu\nlength: %u\n", score_result, minimum_weight, length);
-			score_result = INFINITY;
-		}
-		return score_result;
-		// length * minimum_weight * score_multiplier 
-		// 		+ minimum_weight * score_bonus; //length * minimum_weight;
+		return score_result > 0.0f ? score_result : 0.0f;
 	}
 	float get_normalized_score() const {
 		return length / (1.0 + inverse_dependency_score);
 	}
 
+	//! Default scoring function(optimization goal).
+	static float default_show_score(const ScoreParams p) {
+		return (p.length * p.weight) * p.score_multiplier + p.weight * p.score_bonus;
+	}
 	void show() const {
-		show("");
+		show("", default_show_score);
 	}
 	void show(const char* prefix) const {
-		auto sf = [](const ScoreParams p) {
-			float score = (p.length * p.weight) * p.score_multiplier 
-				+ p.weight * p.score_bonus; //length * minimum_weight;
-			return score;
-		};
-		show(prefix, sf);
+		show(prefix, default_show_score);
 	}
 
 	void show(const char* prefix, std::function <float(const ScoreParams)> score_function) const {
@@ -309,38 +317,8 @@ struct Path
 };
 
 
-//used to represent a node in an identified path/sequence
-//used for exporting identified sequences 
-struct PathNode {
-    Opcode::Mapping instruction;
-    uint64_t weight;
-
-	//uint64_t cycles;
-    //uint64_t subtree_hash;
-	float score_bonus = 0.0;
-	float score_multiplier = 1.0;
-	float inverse_dependency_score = 0.0;
-
-	//usually only for leaf nodes, but we can calculate this from following all branches from the current node
-	std::map<uint64_t, int> program_counters;
-
-	std::vector<int> true_dependencies; //offset to previous node this node has a true dependency to
-	std::set<int8_t> anti_dependencies;
-	std::set<int8_t> output_dependencies;
-
-	//additional per-node info attached by specialized node types (e.g. memory/peripheral access info), merged into to_json() output
-	nlohmann::json extra_fields = nlohmann::json::object();
-
-	//also save registers?
-
-    // Constructor to initialize from an InstructionNode
-    PathNode(Opcode::Mapping instr, uint64_t wt, float score_b, float score_m, float inv_d, 
-				std::map<uint64_t, int> pcs,
-				const std::array<bool, INSTRUCTION_TREE_DEPTH> &dep_true,
-				std::set<int8_t> dep_out, std::set<int8_t> dep_anti);
-
-	nlohmann::json to_json() const;
-};
+//one node of an identified sequence, see trace/path_node.h
+struct PathNode;
 
 struct CsvParams {
     uint64_t total_instructions;
@@ -404,18 +382,19 @@ struct PcCounter {
 };
 #endif
 
-//! What one pc of a node did: its registers, how often it ran there, which pc it came from and
-//! which parameter values it carried.
+//! What one pc of a node did
 struct RegisterSetCounter {
-	//! Occurrences at this pc. 64 bit because a hot node reaches the occurrence count of the
-	//! whole run, which passes four billion in a long one.
+	//! Occurrences at this pc. 64 bit because a node can reach the occurrence count of the
+	//! whole run (which can pass four billion)
 	uint64_t count;
 	RegisterSet regset;
 	#ifdef trace_predecessor_pcs
-	//pc this entry was reached from, and how often. Measured over the embench set, 99 percent of
-	//entries have exactly one predecessor and the most any had was four, so the first one is kept
-	//here and the rest in a vector. A map here cost a tree lookup and an allocation per node per
-	//executed instruction.
+	//pc this entry was reached from, and how often. 
+	//Optimization: 
+	//  Measured over the embench set, 99 percent of
+	//  entries have exactly one predecessor and the most any had was four, so the first one is kept
+	//  here and the rest in a vector. A map cost a tree lookup and an allocation per node per
+	//  executed instruction.
 	uint64_t first_predecessor_pc = 0;
 	uint64_t first_predecessor_count = 0;
 	std::vector<PcCounter> more_predecessors;
@@ -430,7 +409,7 @@ struct RegisterSetCounter {
 
 	#ifdef trace_predecessor_pcs
 	void count_predecessor(uint64_t pc){
-		//a count of zero means nothing has been recorded yet; pc 0 is a real value
+		//a count of zero means nothing has been recorded yet (pc 0 is a real value)
 		if(first_predecessor_count == 0 || first_predecessor_pc == pc){
 			first_predecessor_pc = pc;
 			first_predecessor_count++;
@@ -476,8 +455,8 @@ struct RegisterSetCounter {
 };
 
 
-//! Memory addresses one load or store node touched, and the peripherals they hit.
-//! Allocated with the node (see InstructionNode::create), so only load and store nodes pay for it.
+//! Memory addresses one load or store node touched (and the peripherals).
+//! Allocated with the node (see InstructionNode::create), so only load and store nodes pay the overhead.
 class MemoryNode{
 	public: 
 		bool is_store = false;
@@ -490,17 +469,8 @@ class MemoryNode{
 		MemoryNode(){};
 		MemoryNode(bool is_store_instruction);
 
-		nlohmann::ordered_json memory_to_json(){
-			nlohmann::ordered_json json; 
-			json["LS"] = is_store;
-			json["Accesses"] = memory_accesses;
-			json["OffsetSum"] = access_offset_sum;
-			if(peripheral_access_counts.size()>0){
-				json["Peripherals"] = peripheral_by_address;
-				json["PeripheralAccessCounts"] = peripheral_access_counts;
-			}
-			return json;
-		};
+		//! The payload's own fields, merged into the node's json by the exporters.
+		nlohmann::ordered_json memory_to_json();
 
 		void register_access(uint64_t pc, uint64_t address, AccessType access_type,uint64_t prev_access, 
 								uint64_t stackpointer, uint64_t framepointer, const char* peripheral_name = nullptr);
@@ -527,22 +497,8 @@ class BranchNode{
 
 		BranchNode(){};
 
-		nlohmann::ordered_json branch_to_json(){
-			nlohmann::ordered_json json;
-			json["Direction"] = (is_backward_jump * 1) + (is_forward_jump * 2);
-			json["offsets"] = relative_offsets;
-			#ifdef trace_branch_outcomes
-			nlohmann::json jsonOutcomes = nlohmann::json::object();
-			for (const auto& entry : branch_outcomes) {
-				jsonOutcomes[std::to_string(entry.first)] = {
-					{"offset", entry.second.offset},
-					{"taken", entry.second.taken},
-					{"not_taken", entry.second.not_taken}};
-			}
-			json["BranchOutcomes"] = jsonOutcomes;
-			#endif
-			return json;
-		};
+		//! The payload's own fields, merged into the node's json by the exporters.
+		nlohmann::ordered_json branch_to_json();
 
 		//record the actual outcome of one dynamic execution of this branch/jump.
 		//pc_relative is false for JALR, whose offset is relative to rs1 instead of the pc,
@@ -551,7 +507,7 @@ class BranchNode{
 
 };
 
-//! Opcodes that get a branch payload: the six conditional branches and the two jumps.
+//! Opcodes that get a branch payload.
 inline bool is_branch_opcode(Opcode::Mapping op){
 	using namespace Opcode;
 	switch (op){
@@ -565,6 +521,7 @@ inline bool is_branch_opcode(Opcode::Mapping op){
 
 //! Which memory payload an opcode gets. Only the rv32 word and sub word accesses are marked,
 //! so the rv64 and floating point accesses record no addresses.
+//TODO: extend this for rv64, A and F/D support.
 enum class MemoryOpcode : uint8_t { NONE, LOAD, STORE };
 inline MemoryOpcode memory_opcode(Opcode::Mapping op){
 	using namespace Opcode;
@@ -581,6 +538,7 @@ inline MemoryOpcode memory_opcode(Opcode::Mapping op){
 //! The type of a new node: the payload its opcode needs, plus LEAF when it ends a window.
 //! A root node is a plain NODE whatever its opcode, so a tree of loads records no addresses at
 //! its root. Tracer::tree_for is the only place that creates one.
+//TODO: check if this keeping this a plain node is a problem in the current implementation or if it can be kept plain
 inline NODE_TYPE node_type_for(Opcode::Mapping op, bool leaf){
 	uint8_t type = leaf ? (uint8_t)NODE_TYPE::LEAF : (uint8_t)NODE_TYPE::NODE;
 	if(memory_opcode(op) != MemoryOpcode::NONE){
@@ -593,16 +551,18 @@ inline NODE_TYPE node_type_for(Opcode::Mapping op, bool leaf){
 
 
 /**
- * One instruction of an execution sequence tree: every window that reaches it ran this
- * instruction at this position, and the node counts and describes those runs.
+ * One instruction of an execution sequence tree
+ * every window that reaches it ran this instruction at this position.
  *
- * `node_type` says what the node is. A LEAF ends a window and has no children. A MEMORY node
- * also carries the addresses its instruction touched, a BRANCH node the outcomes it took.
+ * `node_type` says what type the node is. 
+ * A LEAF ends a window and has no children. 
+ * A MEMORY node carries the addresses its instruction touched. 
+ * A BRANCH node the branch outcomes.
  * Those two payloads live directly after the node in one allocation, so a node that needs
- * neither costs nothing for them; reach them with memory() and branch().
+ * neither has no overhead.
  *
  * Nodes live until the process ends. `create` therefore allocates raw storage and no
- * destructor ever runs.
+ * destructor is needed.
  */
 class InstructionNode{
 	public:
@@ -613,12 +573,11 @@ class InstructionNode{
 					subtree_hash = ((parent_hash << 6) | (parent_hash >> 58)) ^ instruction;
 		}
 
-		//! Allocate a child node for `op`, with the payload the opcode needs, in one block.
+		//! Allocate a child node for `op`, with the payload the opcode needs.
 		static InstructionNode* create(Opcode::Mapping op, uint64_t parent_hash, bool leaf);
 
 		Opcode::Mapping instruction = Opcode::UNDEF;
-		//! What this node carries. Fixed when the node is created, except that pruning turns a
-		//! node into a leaf.
+		//! What this node contains.
 		NODE_TYPE node_type = NODE_TYPE::NODE;
 
 		uint64_t subtree_hash = 0;
@@ -628,7 +587,8 @@ class InstructionNode{
 		//weight counting only unique paths that contain this node
 		//exclude paths that already contain this node with another prefix (e.g. ADD -> SUB -> ADD -> SUB)
 		//used to calculate the coverage of a sequence (length * true_weight) 
-		//using the normal weight can lead to overestimation of coverage (sequence > 100% coverage)
+		//using the normal weight can lead to a wrong coverage (sequence > 100% coverage)
+		//for almost all nodes this is equal to weight
 		uint64_t true_weight = 0;
 
 		//last step id this node occurred in
@@ -641,28 +601,30 @@ class InstructionNode{
 		uint64_t total_cycles = 0;
 
 		#ifdef trace_individual_registers
-		//! Per pc: how often this node ran at that pc, its registers, its predecessors and the
-		//! parameter values seen there. Keyed by pc, so it is also where get_pc() comes from.
+		//! Per pc -> (weight, registers/inputs, predecessors). 
+		//This is also where get_pc() comes from.
 		std::map<uint64_t, RegisterSetCounter> register_sets;
 		#endif
 
-		//! One child and the opcode that leads to it. Keeping the opcode next to the pointer is
-		//! what makes the search below cheap: it reads one contiguous array instead of loading
-		//! every child node to look at its opcode, which costs a cache miss per child.
+		//! One child + the opcode that leads to the node. Keeping the opcode next to the pointer makes the search much faster, 
+		//! because it reads one contiguous array instead of loading
+		//! every child node to check its opcode (costs a cache miss per child) 
 		struct Child {
 			Opcode::Mapping op;
 			InstructionNode* node;
 		};
 
-		//! Empty on a leaf, and on an inner node no window has reached past yet.
+		//! Empty on a leaf. Should never be empty otherwise. 
 		std::vector<Child> children;
 
 		//entry i is set when this node reads a value written i instructions earlier in the window
-		//(1 = written by the parent). Entry 0 is never set: a node does not depend on itself.
-		//a byte per offset rather than a bit mask: the two writes on the insert path are then
-		//independent stores instead of a read-modify-write of one shared word, which measures
-		//about 1.5 percent faster over the embench set. Must be zero initialized here, because
-		//a node is created with raw storage and a plain member array would be left indeterminate.
+		//(1 = written by the parent). 
+		//Entry 0 is never set: a node does not depend on itself.
+		//performance vs bitmask: 
+		//  the two writes on the insert path are 
+		//  independent stores instead of a read-modify-write of one shared word, which is
+		//  about 1.5% faster. Must be zero initialized here, because
+		//  a node is created with raw storage and a plain member array would be left indeterminate.
 		std::array<bool, INSTRUCTION_TREE_DEPTH> dependencies_true_ = {};
 		//index of other nodes this node has a anti/output dependency to
 		std::bitset<INSTRUCTION_TREE_DEPTH> dependencies_anti_;
@@ -671,21 +633,7 @@ class InstructionNode{
 		std::bitset<32> inputs_;
 		std::bitset<32> outputs_;
 
-		//No per node phase counters, and the trace's `occurrence` field is four zeros.
-		//
-		//The intent was to say where in the lifetime of a run an instruction belongs: startup,
-		//initialization, or the real workload. Two designs for it do not work.
-		//
-		//Four counters split by fixed step ids (the O_STARTUP, O_BEGINNING and O_MID constants
-		//below) cannot place their boundaries, because the length of the run is unknown while it
-		//is being traced.
-		//
-		//One running sum of the step ids a node occurred at, divided by its weight at the end,
-		//overflows. A node can be updated at every step and every step id goes up to the total
-		//instruction count, so the sum is bounded by that count squared, which exceeds a 64 bit
-		//integer. Normalising after the run does not prevent the overflow during it.
-
-		// ------------------------------------------------------------- what this node is
+		// ------------------------------------------------------------- node type
 
 		//! Ends a window, so it has no children and the exports stop here.
 		bool is_leaf() const {
@@ -724,25 +672,28 @@ class InstructionNode{
 		// ------------------------------------------------------------- recording
 
 		/**
-		 * Insert the window ending at `next_rb_index` into this tree, this node being its root.
+		 * Insert the window ending at `next_rb_index` into this tree (this node is its root)
 		 *
 		 * Works out the register and memory dependencies between the instructions of the window
-		 * and walks down the tree, creating the nodes that do not exist yet. Runs once per
-		 * executed instruction and its cost grows with the trace depth, so it is the hottest
-		 * function of the tracer.
+		 * and walks down the tree, creating the nodes that do not exist yet. 
+		 * Runs once per executed instruction and grows with the trace depth. 
 		 *
 		 * The ring buffer is only read, so it is passed by reference: it is copied once per
-		 * executed instruction otherwise, which is 120 bytes per tree depth step.
+		 * executed instruction otherwise, which is 120 bytes per tree depth step. 
+		 * This function is the main bottleneck of the tracing. 
+		 * 
+		 * TODO: the register dependency analysis is theoretically not needed anymore by the analysis frontend and can be reconstructed (aside from memory)
+		 * 		 having and optional flag to disable it could speed up the tracing significantly. 
 		 */
 		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
 						uint32_t next_rb_index);
 		void insert_rb(const std::array<ExecutionInfo, INSTRUCTION_TREE_DEPTH>& last_executed_instructions, 
 						uint32_t next_rb_index, uint32_t offset);
 
-		//! Find or create the child for one step of a window and count the step on it.
+		//! Find or create the child for one step of a window and update it.
 		InstructionNode* insert(const StepInfo& p);
 
-		//! Count one occurrence of this node and record what the instruction did.
+		//! Count one occurrence of this node and update its values.
 		void update_weight(const StepInfo& p);
 
 		// ------------------------------------------------------------- reading
@@ -750,8 +701,8 @@ class InstructionNode{
 		//! The pcs this node ran at and how often, taken from register_sets.
 		std::map<uint64_t, int> get_pc() const;
 
-		//! The largest number of distinct pcs any node in this subtree ran at, which is what the
-		//! csv export compares a single node's count against.
+		//! The largest number of distinct pcs any node in this subtree ran at
+		//! used by the csv export.
 		uint64_t max_pc_count() const;
 
 		float get_score_bonus() const;
@@ -763,8 +714,7 @@ class InstructionNode{
 
 		/**
 		 * Write this tree as dot to standard output. `branch_threshold` omits any branch
-		 * carrying less than that share of the tree's weight, which keeps a graph of a real
-		 * program readable; pass 0 to draw every branch.
+		 * carrying less than that share of the tree's weight, otherwise graphviz can not draw the tree (properly). 
 		 */
 		void tree_to_dot(uint64_t total_instructions, float branch_threshold);
 
@@ -778,26 +728,26 @@ class InstructionNode{
 
 		void to_csv(const CsvParams& p);
 
-		//! Highest scoring sequence starting at this node, over every branch below it.
+		//! Find the highest scoring sequence starting at this node.
+		//! Exhaustive
 		Path extend_path(const PathExtensionParams& p);
 		//! The `top_k` highest scoring sequences starting at this node.
 		std::vector<Path> extend_top_paths(const PathExtensionParams& p, size_t top_k);
 		//extend existing path beyond its original endpoint
-		//expects an existing path + first Node new path that should be extended
-		//handles possible branch instructions and the calls extend_path() 
+		//expects an existing path
 		std::vector<Path> force_path_extension(Path p, std::function <float(ScoreParams)> score_function);
 
 		std::vector<PathNode> path_to_path_nodes(Path path, uint depth);
 
-		//find a point in an existing sequence with the highest ratio between branch taken in the original sequence 
-		// and another possible branch not taken, which would lead to a different sequence 
+		//find a point in an existing sequence with the highest ratio between children taken (not necessarily branch instructions!) in the original sequence 
+		// and another possible child not taken, which would lead to a different sequence 
 		std::vector<BranchingPoint> find_variant_branch(Path path, uint8_t depth);
 
 		//! Turn every branch below the given share of this node's weight into a leaf.
 		int prune_tree(uint64_t weight_threshold, uint8_t depth);
 
 	private:
-		//! Where create() put the payload: directly after the node.
+		//! Where create() put the payload (directly after the node)
 		void* payload_slot() {
 			return reinterpret_cast<char*>(this) + sizeof(InstructionNode);
 		}

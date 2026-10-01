@@ -98,14 +98,17 @@ struct GenericMMU {
                 mode = core.csrs.mstatus.fields.mpp;
         }
 
-        if (mode == MachineMode)
+        // Machine mode is never translated. The same test bounds the tlb index below: mode comes
+        // from prv or, under mprv, from the two bit mstatus.mpp, so it can also be the reserved
+        // value 2, and the tlb has one row per supported mode. NUM_MODES is 2 and MachineMode is
+        // 3, so this one comparison covers both.
+        if (mode >= NUM_MODES)
             return vaddr;
 
         // optional timing
         quantum_keeper.inc(mmu_access_delay);
 
         // optimization only, to void page walk
-        assert(mode == 0 || mode == 1);
         assert(type == 0 || type == 1 || type == 2);
         auto vpn = (vaddr >> PGSHIFT);
         auto idx = vpn % TLB_ENTRIES;
@@ -135,16 +138,18 @@ struct GenericMMU {
                 return {4, 9, 8, ptbase};
             case SATP_MODE_SV57:
                 return {5, 9, 8, ptbase};
-            case SATP_MODE_SV64:
-                return {6, 9, 8, ptbase};
             default:
                 throw std::runtime_error("unknown Sv (satp) mode " + std::to_string(mode));
         }
     }
 
     bool check_vaddr_extension(uint64_t vaddr, const vm_info &vm) {
+        //Sv32 to Sv57 all leave at least one bit above the index bits, which is what the masks
+        //below need. Sv64 would give 65 and shift both operands past the width of uint64_t;
+        //six levels of nine bits plus a twelve bit offset cannot describe a 64 bit address
+        //space either, so decode_vm_info rejects that mode instead of returning it.
         int highbit = vm.idxbits * vm.levels + PGSHIFT - 1;
-        assert(highbit > 0);
+        assert(highbit > 0 && highbit < (int)core.xlen);
         uint64_t ext_mask = (uint64_t(1) << (core.xlen - highbit)) - 1;
         uint64_t bits = (vaddr >> highbit) & ext_mask;
         bool ok = (bits == 0) || (bits == ext_mask);

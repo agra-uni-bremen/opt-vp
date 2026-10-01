@@ -4,8 +4,6 @@
 #include <fcntl.h>
 #include <stdint.h>
 
-#include <boost/lexical_cast.hpp>
-
 // see: newlib/libgloss/riscv @
 // https://github.com/riscv/riscv-newlib/tree/riscv-newlib-2.5.0/libgloss/riscv
 
@@ -103,7 +101,7 @@ struct SyscallHandler : public sc_core::sc_module, syscall_emulator_if {
 
 		auto ans = execute_syscall(syscall, a0, a1, a2, a3);
 
-		core->write_register(RegFile::a0, boost::lexical_cast<int32_t>(ans));
+		core->write_register(RegFile::a0, ans);
 
 		if (shall_exit)
 			core->sys_exit();
