@@ -6,7 +6,13 @@
   "Every case runs at --trace-depth 6.",
   "",
   "A case with \"ci\": false is left out by --ci. It needs something the CI image does not",
-  "have (cross compiler with a C library)."
+  "have (cross compiler with a C library).",
+  "",
+  "A case with \"model\": true is also compared against tests/trace/model.py. The model describes",
+  "RV32IM programs that do not trap and use no compressed instructions.",
+  "",
+  "A case with \"same_as\": \"<case>\" has no reference of its own. It must produce exactly the",
+  "files, counters and registers recorded for the named case."
  ],
  "cases": [
   {
@@ -18,7 +24,8 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "default",
@@ -29,7 +36,8 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "memory",
@@ -40,7 +48,8 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "output-dep",
@@ -51,7 +60,8 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "prefix",
@@ -62,7 +72,20 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
+  },
+  {
+   "name": "rv32im",
+   "comment": "Every RV32IM instruction the model describes, every branch both taken and not taken at the same pc, every load and store width, and a call through a register other than ra.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-rv32im",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6"
+   ],
+   "model": true
   },
   {
    "name": "basic-c",
@@ -85,7 +108,8 @@
     "-e",
     "--trace-depth",
     "4"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "basic-platform",
@@ -96,7 +120,8 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "rv64",
@@ -107,7 +132,8 @@
     "-e",
     "--trace-depth",
     "6"
-   ]
+   ],
+   "model": true
   },
   {
    "name": "no-trace",
@@ -130,6 +156,46 @@
     "-e",
     "--trace-depth",
     "6"
+   ]
+  },
+  {
+   "name": "performance-mode",
+   "comment": "--performance-mode raises the TLM quantum. A program that does not read the timer must produce the same trace and the same registers with it.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-default",
+   "same_as": "default",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6",
+    "--performance-mode"
+   ]
+  },
+  {
+   "name": "no-dmi",
+   "comment": "--no-dmi sends every fetch, load and store over the bus instead of through direct memory access. The result must not change.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-rv32im",
+   "same_as": "rv32im",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6",
+    "--no-dmi"
+   ]
+  },
+  {
+   "name": "basic-c-performance-mode",
+   "comment": "The same pin as performance-mode on a compiled C program.",
+   "ci": false,
+   "vp": "tiny32-vp",
+   "program": "sw/basic-c",
+   "same_as": "basic-c",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6",
+    "--performance-mode"
    ]
   }
  ]

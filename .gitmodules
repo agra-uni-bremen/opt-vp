@@ -16,3 +16,6 @@
 [submodule "vp/src/lib/json"]
 	path = vp/src/lib/json
 	url = https://github.com/nlohmann/json.git
+[submodule "tests/isa/riscv-tests"]
+	path = tests/isa/riscv-tests
+	url = https://github.com/riscv-software-src/riscv-tests.git

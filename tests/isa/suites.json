@@ -1,0 +1,58 @@
+{
+ "comment": [
+  "Suites for tests/isa/check.py. Each suite is one directory of riscv-tests/isa. check.py reads",
+  "the test names from that directory's Makefrag, compiles each test for the physical memory",
+  "environment (env/p) with the given -march, and runs it on the given VP.",
+  "",
+  "`isa` is passed to the VP as --isa and sets the extensions misa reports.",
+  "",
+  "`skip` lists tests that are not built: the VP does not implement what they test, or the",
+  "compiler cannot assemble them. `known_failures` lists tests that are built and run and are",
+  "expected to fail. A known failure that starts to pass is reported, so the",
+  "list cannot go stale."
+ ],
+ "suites": [
+  {"name": "rv32ui", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32um", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32ua", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32uc", "vp": "test32-vp", "march": "rv32gc", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32uf", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32ud", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32mi", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv32si", "vp": "test32-vp", "march": "rv32g", "mabi": "ilp32", "isa": "imacfdsu"},
+  {"name": "rv64ui", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64um", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64ua", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64uc", "vp": "test64-vp", "march": "rv64gc", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64uf", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64ud", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64mi", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"},
+  {"name": "rv64si", "vp": "test64-vp", "march": "rv64g", "mabi": "lp64d", "isa": "imacfdsu"}
+ ],
+ "skip": {
+  "rv32ua-p-amocas_w": "Zacas is not implemented",
+  "rv32ua-p-amocas_d": "Zacas is not implemented",
+  "rv64ua-p-amocas_w": "Zacas is not implemented",
+  "rv64ua-p-amocas_d": "Zacas is not implemented",
+  "rv64ua-p-amocas_q": "Zacas is not implemented"
+ },
+ "known_failures": {
+  "rv32ui-p-ma_data": "the VP traps on a misaligned load or store, which the specification allows; this test needs them to complete",
+  "rv32mi-p-csr": "test case 13: FLW, FSW, FLD and FSD do not check mstatus.FS, so an FP store with the FPU off writes memory instead of trapping",
+  "rv32mi-p-instret_overflow": "test case 2: a CSR write to minstret does not suppress the increment of the instruction that wrote it",
+  "rv32mi-p-sbreak": "EBREAK stops the direct runner with an exception instead of raising a breakpoint trap",
+  "rv32si-p-sbreak": "EBREAK stops the direct runner with an exception instead of raising a breakpoint trap",
+  "rv32si-p-dirty": "the VP crashes with a segmentation fault in CombinedMemoryInterface::store_word under Sv32 translation",
+  "rv64ui-p-ma_data": "the VP traps on a misaligned load or store, which the specification allows; this test needs them to complete",
+  "rv64ui-p-srli": "test case 2: rv64 SRLI casts rs1 to uint32_t before the shift, so the upper 32 bits are lost",
+  "rv64uc-p-rvc": "test case 12: C.SRLI expands to SRLI, see rv64ui-p-srli",
+  "rv64mi-p-mcsr": "test case 2: reads misa.MXL with SRLI, see rv64ui-p-srli",
+  "rv64mi-p-breakpoint": "test case 2: rv64 does not implement the trigger CSRs tselect and tdata1 to tdata3, which rv32 does, so accessing them traps",
+  "rv64mi-p-csr": "test case 13: FLW, FSW, FLD and FSD do not check mstatus.FS, so an FP store with the FPU off writes memory instead of trapping",
+  "rv64mi-p-instret_overflow": "test case 2: a CSR write to minstret does not suppress the increment of the instruction that wrote it",
+  "rv64mi-p-sbreak": "EBREAK stops the direct runner with an exception instead of raising a breakpoint trap",
+  "rv64si-p-sbreak": "EBREAK stops the direct runner with an exception instead of raising a breakpoint trap",
+  "rv64si-p-dirty": "the VP crashes with a segmentation fault in CombinedMemoryInterface::store_word under Sv39 translation",
+  "rv64si-p-icache-alias": "the VP crashes with a segmentation fault in CombinedMemoryInterface::load_instr under Sv39 translation"
+ }
+}

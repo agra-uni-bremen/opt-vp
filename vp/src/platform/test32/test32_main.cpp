@@ -21,7 +21,14 @@
 #include <iostream>
 #include <fstream>
 
+// test64-vp is this file compiled against the rv64 core with TEST_RV64 defined, see ../test64.
+#ifdef TEST_RV64
+using namespace rv64;
+#define align_address rv64_align_address
+#else
 using namespace rv32;
+#define align_address rv32_align_address
+#endif
 namespace po = boost::program_options;
 
 class TestOptions : public Options {
@@ -124,7 +131,7 @@ int sc_main(int argc, char **argv) {
     }
 
     loader.load_executable_image(mem, mem.size, opt.mem_start_addr);
-    core.init(instr_mem_if, data_mem_if, &clint, loader.get_entrypoint(), rv32_align_address(opt.mem_end_addr));
+    core.init(instr_mem_if, data_mem_if, &clint, loader.get_entrypoint(), align_address(opt.mem_end_addr));
     sys.init(mem.data, opt.mem_start_addr, loader.get_heap_addr());
     sys.register_core(&core);
 
@@ -162,20 +169,18 @@ int sc_main(int argc, char **argv) {
         new DirectCoreRunner(core);
     }
 
+    uint64_t to_host_value = 0;
     {
         auto addr = loader.get_to_host_address();
         uint8_t *p = &(mem.data[addr - opt.mem_start_addr]);
         assert (((uintptr_t)p) % 8 == 0);  // correct alignment for uint64_t
-        auto to_host_callback = [&core](uint64_t x) {
-            if (x == 1) {
-                //NOTE: the "scall" benchmark (RISC-V compliance) still requires HTIF support for successful completion ...
+        // A test ends by writing tohost: 1 is a pass, and any other nonzero value is a failure.
+        // riscv-tests write (number of the failing test << 1) | 1.
+        auto to_host_callback = [&core, &to_host_value](uint64_t x) {
+            if (x != 0) {
+                to_host_value = x;
+                std::cout << "to-host: " << std::to_string(x) << std::endl;
                 core.sys_exit();
-            } else {
-                if (x != 0) {
-                    std::cout << "to-host: " << std::to_string(x) << std::endl;
-                    core.sys_exit();
-                }
-                //throw std::runtime_error("to-host: " + std::to_string(x));
             }
         };
         new HTIF("HTIF", (uint64_t*)p, &core.total_num_instr, opt.max_test_instrs, to_host_callback);
@@ -212,5 +217,9 @@ int sc_main(int argc, char **argv) {
         dump_test_signature(opt, mem.data, loader);
     }
 
+    if (to_host_value > 1) {
+        std::cout << "test failed: tohost " << to_host_value << ", test number " << (to_host_value >> 1) << std::endl;
+        return 1;
+    }
     return 0;
 }

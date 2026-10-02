@@ -126,17 +126,33 @@ benchmark as fast as one built without it.
 
 ## Tests
 
-There is currently no proper testing system in place. 
-`/sw/` contains a small number of example applications. 
-`/home/jz/Documents/RISCV/embench-iot/bd/src` contains prebuilt EmBench binaries. 
+Run them after changes. Together they take under ten seconds. CI runs them too.
+
+```bash
+python3 tests/isa/check.py     # riscv-tests on test32-vp/test64-vp: does the VP execute correctly?
+python3 tests/trace/check.py   # trace cases: did the trace change, and are they correct?
+```
+
+`tests/isa/suites.json` lists the known failures of the simulator with their reasons.
+`tests/trace/check.py` compares each case against its committed reference, checks the trace
+invariants (`invariants.py`), and compares the model cases node by node against an independent
+reference model (`model.py`). `VP_DEVIATIONS` in `model.py` names where the tracer differs from
+the meaning of the instructions. 
+Fixing an issue -> delete the entry -> `--update` traces. 
+A trace check failure starting with `invariant:` or `model:` means the trace is
+wrong, not just changed. The READMEs in `tests/isa` and `tests/trace` explain the output.
+
+`/sw/` contains a small number of example applications.
+`../embench-iot/bd/src` contains prebuilt EmBench binaries locally one some systems. 
+`python3 tests/trace/invariants.py <out dir> --depth <d>` checks a benchmark trace.
 
 ## Roadmap
 
 `ROADMAP.md` lists every planned or proposed feature with a status and a next step. Add an entry
 when a feature is agreed, and change its status in the commit that changes the work.
 
-**Testsuite and CI** There exist simple software examples in /sw and multiple bechmark suites like embench, ml-commons, tacle or RIOT are frequently run on the VP without issues. However in its current state it lacks a proper test setup. One Fork started to use TestRIG for equivalence checking, but this requires large modifications to the VP core. A test setup that can be run using github CI would be good. 
-**Refactoring** The VP is a complex framework and contains some very large files (e.g. iss.cpp). While smaller modifications are easy to implement with its current design, larger additions require much more work. Refactoring the VP into smaller modules would make future work easier and faster. Even now many modules are never touched and most changes happen in iss.cpp. 
+**Testsuite and CI** `tests/isa` and `tests/trace` run in GitHub CI, see Tests above. Not covered yet: the platforms other than tiny32, tiny64, basic and test32/64 are built but never run, and the C cases need a C library the CI image lacks. One fork used TestRIG for equivalence checking, which needs large changes to the VP core. 
+**Refactoring** The VP is a complex framework and contains some very large files (e.g. iss.cpp). While smaller modifications are easy to implement with its current design, larger additions require much more work. Refactoring the VP into smaller modules would make future work easier and faster. Even now many modules are never touched and most changes happen in iss.cpp. The Refactor is currently ongoing. 
 
 ## ExecPlans
 
@@ -172,9 +188,8 @@ contiguous executed instruction window. The tree structure is similar to tries/p
 
 Snapshots document the result quality at that tool state. This allows measuring the impact of 
 changes in different commits. 
-Snapshots are **committed**, in `snapshots/`, named `<date>-<first 6 chars of the last commit
+Snapshots are **committed**, in `docs/snapshots/`, named `<date>-<first 6 chars of the last commit
 id>.json`. The id is the *previous* commit on purpose: the one a snapshot documents does not
 exist until it has been taken. 
 You can take a snapshot before a change and one after; `--compare` prints the deltas and
 **warns loudly when the two runs used different settings**. 
-This concept is currently not implemented, but a reference for a different project is availbale here `/../EX-T-Viz/scripts/snapshot.py`

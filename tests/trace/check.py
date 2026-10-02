@@ -12,6 +12,17 @@ When a digest mismatches, the produced output is kept and the message says where
 so you can look at the actual JSON. To see the difference against the previous
 commit, check that commit out, run with `--update`, and read the diff of the
 reference file (or keep the two output directories and diff them).
+
+The digests say whether a trace changed, not whether it is right. Three more checks say that:
+
+* every case that writes a trace is checked against the invariants in `invariants.py`,
+  which every JITR trace must satisfy;
+* a case with `"model": true` is also compared node by node against `model.py`, an
+  independent implementation of the trace built from the `--trace-mode` instruction list;
+* a case with `"same_as": "<case>"` must reproduce that case's reference exactly. It pins
+  that a switch such as `--performance-mode` changes the speed and not the result.
+
+`--update` runs the first two as well and does not record a trace that fails them.
 """
 
 import argparse
@@ -22,6 +33,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent / "scripts"))
+sys.path.insert(0, str(HERE))
+import invariants  # noqa: E402
+import jitr  # noqa: E402
+import model  # noqa: E402
 import vpbench  # noqa: E402
 
 REFERENCE_DIR = HERE / "reference"
@@ -82,6 +97,38 @@ def reference_path(name):
     return REFERENCE_DIR / f"{name}.json"
 
 
+def trace_depth(case):
+    """The --trace-depth a case runs with. Every case passes it explicitly."""
+    flags = case.get("flags", [])
+    return int(flags[flags.index("--trace-depth") + 1])
+
+
+def semantic_problems(case, result, out_dir):
+    """Check the trace against the invariants and, for a model case, against the model."""
+    if not case.get("writes_files", True):
+        return []
+    depth = trace_depth(case)
+    recorded = result["counters"].get("instructions")
+    if recorded is not None and recorded >= depth and \
+            "last-full-window-missing" in model.VP_DEVIATIONS:
+        recorded -= 1
+    problems = [f"invariant: {p}" for p in invariants.check(jitr.load(out_dir), depth, recorded)]
+
+    if case.get("model"):
+        flags = case["flags"]
+        extra = [f for i, f in enumerate(flags)
+                 if f not in ("-e", "--trace-depth") and flags[i - 1] != "--trace-depth"]
+        try:
+            differences = model.check(vpbench.find_vp(case.get("vp", "tiny32-vp")),
+                                      vpbench.resolve_program(case["program"]),
+                                      OUT_DIR / f"{case['name']}-model", depth, extra)
+        except vpbench.VpError as error:
+            differences = [str(error)]
+        problems += [f"model: {p}" for p in differences]
+        shutil.rmtree(OUT_DIR / f"{case['name']}-model", ignore_errors=True)
+    return problems
+
+
 def write_reference(case, entries, result):
     """Record a manifest plus the counters, so a reference says what produced it."""
     payload = {
@@ -125,7 +172,7 @@ def register_problems(want, got):
 
 def compare(case, entries, result):
     """Return a list of human readable differences, empty when the case passes."""
-    path = reference_path(case["name"])
+    path = reference_path(case.get("same_as", case["name"]))
     if not path.is_file():
         return [f"no reference at {path.relative_to(vpbench.REPO_ROOT)}. "
                 f"Create it with: python3 tests/trace/check.py --update"]
@@ -133,7 +180,7 @@ def compare(case, entries, result):
     reference = json.loads(path.read_text())
     problems = []
 
-    for key in ("vp", "program", "flags"):
+    for key in () if "same_as" in case else ("vp", "program", "flags"):
         want = reference.get(key)
         got = case.get(key, "tiny32-vp" if key == "vp" else case.get(key))
         if key == "flags":
@@ -210,31 +257,33 @@ def main(argv):
             failures.append(name)
             continue
 
-        if args.update:
+        problems = semantic_problems(case, result, out_dir)
+        if not args.update or "same_as" in case:
+            problems = compare(case, entries, result) + problems
+        if problems:
+            print(f"FAIL  {name}")
+            for problem in problems[:20]:
+                print(f"      {problem}")
+            if len(problems) > 20:
+                print(f"      ... and {len(problems) - 20} more")
+            print(f"      output kept at {out_dir.relative_to(vpbench.REPO_ROOT)}")
+            failures.append(name)
+        elif args.update and "same_as" not in case:
             path = write_reference(case, entries, result)
-            print(f"WROTE {name:<24}{len(entries)} files -> "
+            print(f"WROTE {name:<28}{len(entries)} files -> "
                   f"{path.relative_to(vpbench.REPO_ROOT)}")
         else:
-            problems = compare(case, entries, result)
-            if problems:
-                print(f"FAIL  {name}")
-                for problem in problems[:20]:
-                    print(f"      {problem}")
-                if len(problems) > 20:
-                    print(f"      ... and {len(problems) - 20} more")
-                print(f"      output kept at {out_dir.relative_to(vpbench.REPO_ROOT)}")
-                failures.append(name)
-            else:
-                print(f"ok    {name:<24}{len(entries)} files, "
-                      f"{result['counters'].get('instructions', '?')} instructions")
+            print(f"ok    {name:<28}{len(entries)} files, "
+                  f"{result['counters'].get('instructions', '?')} instructions")
 
         if not args.keep and name not in failures and not args.update:
             shutil.rmtree(out_dir, ignore_errors=True)
 
     if failures:
         print(f"\n{len(failures)} of {len(cases)} cases failed: {', '.join(failures)}")
-        print("If the change was meant to move the trace, record it and say so in the")
-        print("changelog: python3 tests/trace/check.py --update")
+        print("A line starting with 'invariant:' or 'model:' means the trace is wrong, whatever the")
+        print("reference says. If the change was only meant to move the trace, record it and say so")
+        print("in the changelog: python3 tests/trace/check.py --update")
         return 1
 
     print(f"\nall {len(cases)} cases match the reference")

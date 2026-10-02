@@ -26,6 +26,18 @@ cycle coverage
   {term}`variant` costs in software, times its {term}`true weight`, over the
   whole workload priced by the same cost model. 
 
+reference model
+  **Preferred term:** reference model. **Accepted aliases:** trace model. A
+  second implementation of the JITR trace, `tests/trace/model.py`. It derives
+  every node from the list of executed instructions that `--trace-mode` prints,
+  and the trace check compares it node by node with what the tracer wrote.
+
+reference trace
+  **Preferred term:** reference trace. **Accepted aliases:** reference. The
+  committed record in `tests/trace/reference/` of what one case produced: its
+  flags, counters, final register file and a digest per output file. It says
+  whether a trace changed, not whether it is right.
+
 riscv_standard
   **Preferred term:** `riscv_standard`. **Accepted aliases:** standard contract.
   The {term}`design contract` of one 32-bit instruction in an unmodified
@@ -69,6 +81,27 @@ intermediate representation
   IR. A program representation used between a source language and final output
   so compiler analyses and transformations can operate on explicit structure.
 
+ISA test suite
+  **Preferred term:** ISA test suite. **Accepted aliases:** riscv-tests, the name
+  of the upstream project. The self checking assembly programs in
+  `tests/isa/riscv-tests`, one directory per extension and privilege level, for
+  example `rv32ui` (user level base integer). Each program reports pass or the
+  number of the failing test case through the `tohost` symbol.
+
+known deviation
+  **Preferred term:** known deviation. **Accepted aliases:** none. A named
+  difference between what the VP's tracer records and what the
+  {term}`reference model` derives from the architectural meaning of the
+  instructions. The model reproduces it, so the trace check passes, and
+  `--strict` shows where it applies. Listed in `VP_DEVIATIONS` in
+  `tests/trace/model.py`.
+
+known failure
+  **Preferred term:** known failure. **Accepted aliases:** expected failure. A
+  test of the {term}`ISA test suite` that is built and run and is expected to
+  fail, listed with the reason in `tests/isa/suites.json`. A known failure that
+  starts to pass fails the check, so the list stays current.
+
 LLVM
   **Preferred term:** LLVM. **Accepted aliases:** none. The compiler
   [infrastructure project](https://llvm.org/). LLVM is
@@ -79,6 +112,11 @@ sequence speedup
   faster the custom instruction is than the instructions it replaces, as a ratio
   of cycles. It describes the sequence and not the program: pair it with a
   {term}`coverage` to get an {term}`expected speedup`.
+
+trace invariant
+  **Preferred term:** trace invariant. **Accepted aliases:** none. A property
+  every JITR trace must have, whatever program produced it. Checked by
+  `tests/trace/invariants.py`.
 
 snapshot
   **Preferred term:** snapshot. **Accepted aliases:** none. A committed record

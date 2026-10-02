@@ -82,9 +82,15 @@ add_test(NAME trace
 	COMMAND ./test.sh
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/../tests/trace")
 
+# Runs the riscv-tests ISA suites (tests/isa/riscv-tests) on test32-vp and test64-vp and
+# compares the results against tests/isa/suites.json. Needs the bare metal cross compiler.
+add_test(NAME isa
+	COMMAND python3 check.py
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/../tests/isa")
+
 set_tests_properties(gdb integration sw PROPERTIES ENVIRONMENT
 	PATH=$ENV{PATH}:${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-set_tests_properties(trace PROPERTIES ENVIRONMENT
+set_tests_properties(trace isa PROPERTIES ENVIRONMENT
 	VP_BIN_DIR=${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_tests_properties(libgdb PROPERTIES ENVIRONMENT
 	RISCV_VP_BASE=${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -106,6 +112,7 @@ add_custom_target(minimal
 
 # The binaries a change is normally checked against. tiny64-vp is here because the trace
 # reference check runs a case on it, and a stale binary would pass that case silently.
+# test32-vp and test64-vp run the ISA suites in tests/isa.
 add_custom_target(essential
 	DEPENDS
 		riscv-vp
@@ -113,5 +120,7 @@ add_custom_target(essential
 		tiny32-vp
 		tiny64-vp
 		microrv32-vp
-	COMMENT "Build essential set of riscv-vp binaries (no GUI/hwitl/virtual-breadboard/test32)"
+		test32-vp
+		test64-vp
+	COMMENT "Build essential set of riscv-vp binaries (no GUI/hwitl/virtual-breadboard)"
 )

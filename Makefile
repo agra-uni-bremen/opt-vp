@@ -69,7 +69,7 @@ half: vp-configure
 
 essential: vp-configure
 	cmake --build vp/build --target essential --parallel $(shell nproc)
-	@echo "Built essential set of vps (riscv-vp, linux32-vp, tiny32-vp, tiny64-vp, microrv32-vp)"
+	@echo "Built essential set of vps (riscv-vp, linux32-vp, tiny32-vp, tiny64-vp, microrv32-vp, test32-vp, test64-vp)"
 
 vp-clean:
 	rm -rf vp/build

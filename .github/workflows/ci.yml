@@ -1,4 +1,4 @@
-name: build and check the trace
+name: build and check the simulator then compare the trace
 
 on:
   push:
@@ -48,12 +48,21 @@ jobs:
         run: |
           for program in trace-test-minimal trace-test-default trace-test-memory \
                          trace-test-output-dep trace-test-prefix trace-test-minimal-rv64 \
-                         basic-asm; do
+                         trace-test-rv32im basic-asm; do
             make -C "sw/${program}"
           done
 
       - name: check the trace against the reference
         run: python3 tests/trace/check.py --ci
+        env:
+          VP_BIN_DIR: ${{ github.workspace }}/vp/build/bin
+
+      # The riscv-tests ISA suites on test32-vp and test64-vp. check.py builds the tests into
+      # out/isa with the same compiler. They need no C library either. It runs even when the
+      # trace check failed, so one log shows both results.
+      - name: check the simulator against the ISA test suites
+        if: ${{ !cancelled() }}
+        run: python3 tests/isa/check.py
         env:
           VP_BIN_DIR: ${{ github.workspace }}/vp/build/bin
 
@@ -68,9 +77,7 @@ jobs:
           if-no-files-found: ignore
 
   # The trace job builds `essential` only, which is five of the fifteen binaries. This job
-  # builds the rest so that a change to a shared header is not found weeks later by whoever
-  # next needs hifive, hwitl, test32, a multicore board or the scoring library. It runs no
-  # program, because the reference check above already covers behaviour.
+  # builds the rest. It runs no program, because the reference check above already covers behaviour.
   build-all:
     runs-on: ubuntu-latest
     steps:
