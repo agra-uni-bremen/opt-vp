@@ -47,7 +47,8 @@ jobs:
       - name: build the trace test programs
         run: |
           for program in trace-test-minimal trace-test-default trace-test-memory \
-                         trace-test-output-dep trace-test-prefix trace-test-minimal-rv64; do
+                         trace-test-output-dep trace-test-prefix trace-test-minimal-rv64 \
+                         basic-asm; do
             make -C "sw/${program}"
           done
 

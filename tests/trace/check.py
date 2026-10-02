@@ -170,6 +170,9 @@ def compare(case, entries, result):
 
 
 def main(argv):
+    #vpbench.note writes to stderr unbuffered. Line buffer stdout too, so that a CI log,
+    #which captures both through a pipe, shows the messages in the order they were written.
+    sys.stdout.reconfigure(line_buffering=True)
     args = parse_args(argv)
     try:
         cases = vpbench.load_cases(CASES)["cases"]
