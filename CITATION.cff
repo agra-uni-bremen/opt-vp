@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the following publication."
+authors:
+  - family-names: "Zielasko"
+    given-names: "Jan"
+  - family-names: "Drechsler"
+    given-names: "Rolf"
+title: "Identifying Hardware Optimizations for Neural Network Inference using Virtual Prototypes"
+version: 1.0.0
+url: "https://github.com/agra-uni-bremen/opt-vp"
+doi: "10.23919/DATE69613.2026.11539431"
