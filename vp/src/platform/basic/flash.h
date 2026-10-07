@@ -47,7 +47,7 @@ struct Blockbuffer {
 	}
 
 	void writeBlock(uint64_t blockOffset) {
-		if (lseek64(fd, blockOffset * width, SEEK_SET) < 0) {
+		if (lseek(fd, blockOffset * width, SEEK_SET) < 0) {
 			cerr << "Could not seek device: " << strerror(errno) << endl;
 			return;
 		}
@@ -59,7 +59,7 @@ struct Blockbuffer {
 	}
 
 	void readBlock(uint64_t blockOffset) {
-		if (lseek64(fd, blockOffset * width, SEEK_SET) < 0) {
+		if (lseek(fd, blockOffset * width, SEEK_SET) < 0) {
 			cerr << "Could not seek device: " << strerror(errno) << endl;
 			return;
 		}
@@ -116,7 +116,7 @@ struct Flashcontroller : public sc_core::sc_module {
 
 		if (ioctl(mFiledescriptor, BLKGETSIZE64, &mDeviceNumBlocks.asInt) < 0) {
 			cerr << "Could not get size of Device " << mFilepath << ": " << strerror(errno) << endl;
-			mDeviceNumBlocks.asInt = lseek64(mFiledescriptor, 0, SEEK_END);
+			mDeviceNumBlocks.asInt = lseek(mFiledescriptor, 0, SEEK_END);
 			if (mDeviceNumBlocks.asInt <= 0) {
 				close(mFiledescriptor);
 				mFiledescriptor = -1;
