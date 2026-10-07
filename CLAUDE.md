@@ -11,7 +11,7 @@ It is a fork of https://github.com/agra-uni-bremen/riscv-vp.
 
 Note: https://github.com/ics-jku/riscv-vp-plusplus is a fork of the original risc-v vp which contains many performance improvements. It also contains numerous changes and additions, not all of which we want to adopt in our VP. It was therefore not merged. 
 
-**Related repositories.** The RETrace framework that consumes the traces is at `../EX-T-Viz/`.
+**Related repositories.** The RETrace framework that consumes the traces is usually found locally at `../EX-T-Viz/`.
 A separate tool, the **Instruction Set Extender** (`../ISE/`), is taking over automation of
 the external toolchain (Verilator, LLVM) and integration as well as acting as an experimental frontend for the VP; 
 

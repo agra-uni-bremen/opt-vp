@@ -24,6 +24,8 @@ When discussing an executable specification (ExecPlan), record decisions in a
 log in the spec for posterity; it should be unambiguously clear why any change
 to the specification was made. ExecPlans are living documents, and it should
 always be possible to restart from _only_ the ExecPlan and no other work.
+However, keep the logs concise and on point and do not include information irrelevant 
+to someone reading the document to either continue or replicate the plan. 
 
 When researching a design with challenging requirements or significant unknowns,
 use milestones to implement proof of concepts, "toy implementations", and
@@ -75,7 +77,7 @@ correctly, and use correct ordered and unordered list syntax. When writing an
 ExecPlan to a Markdown file whose content is only that single ExecPlan, omit the
 outer triple backticks.
 
-Write in plain prose. Prefer sentences over lists. Avoid checklists, tables, and
+Write in plain prose, but keep it concise. Prefer sentences over lists. Avoid checklists, tables, and
 long enumerations unless brevity would obscure meaning. Checklists are permitted
 only in the `Progress` section, where they are mandatory. Narrative sections
 must remain prose-first.
@@ -193,7 +195,7 @@ implementation. Provide concise evidence.
 
 Record every decision made while working on the plan in this form:
 
-- Decision: … Rationale: … Date/Author: …
+- Decision: … Rationale: …
 
 ### Outcomes & Retrospective
 
