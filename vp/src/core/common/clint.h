@@ -56,8 +56,6 @@ struct CLINT : public clint_if, public sc_core::sc_module {
 
 	std::array<clint_interrupt_target *, NumberOfCores> target_harts{};
 
-	SC_HAS_PROCESS(CLINT);
-
 	CLINT(sc_core::sc_module_name) {
 		tsock.register_b_transport(this, &CLINT::transport);
 

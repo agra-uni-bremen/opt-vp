@@ -22,10 +22,6 @@
 #include <sstream>
 #include <string>
 
-#include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/lexical_cast.hpp>
-
 unsigned DebugMemoryInterface::_do_dbg_transaction(tlm::tlm_command cmd, uint64_t addr, uint8_t *data,
                                                    unsigned num_bytes) {
 	tlm::tlm_generic_payload trans;
@@ -45,7 +41,7 @@ unsigned DebugMemoryInterface::_do_dbg_transaction(tlm::tlm_command cmd, uint64_
 std::string DebugMemoryInterface::read_memory(uint64_t start, unsigned nbytes) {
 	std::vector<uint8_t> buf(nbytes);  // NOTE: every element is zero-initialized by default
 
-	unsigned nbytes_read = _do_dbg_transaction(tlm::TLM_READ_COMMAND, start, buf.data(), buf.size());
+	[[maybe_unused]] unsigned nbytes_read = _do_dbg_transaction(tlm::TLM_READ_COMMAND, start, buf.data(), buf.size());
 	assert(nbytes_read == nbytes && "not all bytes read");
 
 	std::stringstream stream;
@@ -81,6 +77,6 @@ void DebugMemoryInterface::write_memory(uint64_t start, unsigned nbytes, const s
 		buf.at(j) = (uint8_t)num;
 	}
 
-	unsigned nbytes_write = _do_dbg_transaction(tlm::TLM_WRITE_COMMAND, start, buf.data(), buf.size());
+	[[maybe_unused]] unsigned nbytes_write = _do_dbg_transaction(tlm::TLM_WRITE_COMMAND, start, buf.data(), buf.size());
 	assert(nbytes_write == nbytes && "not all data written");
 }

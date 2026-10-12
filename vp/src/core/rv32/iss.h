@@ -426,8 +426,6 @@ struct DirectCoreRunner : public sc_core::sc_module {
 	ISS &core;
 	std::string thread_name;
 
-	SC_HAS_PROCESS(DirectCoreRunner);
-
 	DirectCoreRunner(ISS &core) : sc_module(sc_core::sc_module_name(core.systemc_name.c_str())), core(core) {
 		thread_name = "run" + std::to_string(core.get_hart_id());
 		SC_NAMED_THREAD(run, thread_name.c_str());

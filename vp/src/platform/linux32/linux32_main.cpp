@@ -12,7 +12,7 @@
 #include "platform/common/slip.h"
 #include "platform/common/uart.h"
 #include "prci.h"
-#include "syscall.h"
+#include "syscall_handler.h"
 #include "debug.h"
 #include "util/options.h"
 #include "platform/common/options.h"
@@ -20,7 +20,6 @@
 #include "gdb-mc/gdb_server.h"
 #include "gdb-mc/gdb_runner.h"
 
-#include <boost/io/ios_state.hpp>
 #include <boost/program_options.hpp>
 #include <iomanip>
 #include <iostream>

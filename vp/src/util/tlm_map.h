@@ -6,7 +6,7 @@
 #include <tlm_utils/simple_initiator_socket.h>
 #include <tlm_utils/simple_target_socket.h>
 
-#include <boost/format.hpp>
+#include <format>
 #include <functional>
 #include <unordered_map>
 
@@ -86,8 +86,8 @@ struct AddressMapping : public AbstractMapping {
 
 	bool try_handle(tlm::tlm_generic_payload &trans, sc_core::sc_time &delay) {
 		auto addr = trans.get_address();
-		auto len = trans.get_data_length();
-		auto cmd = trans.get_command();
+		[[maybe_unused]] auto len = trans.get_data_length();
+		[[maybe_unused]] auto cmd = trans.get_command();
 
 		if (addr >= start && addr < end) {
 			assert((addr + len <= end) && "memory out of bounds access");
@@ -169,7 +169,7 @@ struct RegisterMapping : public AbstractMapping {
 	bool try_handle(tlm::tlm_generic_payload &trans, sc_core::sc_time &delay) {
 		auto addr = trans.get_address();
 		auto new_vptr = (uint32_t *)trans.get_data_ptr();
-		auto len = trans.get_data_length();
+		[[maybe_unused]] auto len = trans.get_data_length();
 		auto cmd = trans.get_command();
 
 		auto it = addr_to_reg.find(addr - addr % 4);  // clamp to nearest register
@@ -232,7 +232,7 @@ struct LocalRouter {
 				return;
 		}
 		throw std::runtime_error("access of unmapped address (local TLM router): name=" + name + ", addr=0x" +
-		                         (boost::format("%X") % trans.get_address()).str());
+		                         std::format("{:X}", trans.get_address()));
 	}
 
 	RegisterMapping &add_register_bank(const std::vector<reg_mapping_t> &regs) {

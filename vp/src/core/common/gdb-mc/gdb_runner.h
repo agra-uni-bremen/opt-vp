@@ -8,8 +8,6 @@
 
 SC_MODULE(GDBServerRunner) {
 public:
-	SC_HAS_PROCESS(GDBServerRunner);
-
 	GDBServerRunner(sc_core::sc_module_name, GDBServer *, debug_target_if *);
 private:
 	GDBServer *server;

@@ -12,8 +12,7 @@
 #include "fd_abstract_uart.h"
 
 #define stop_fd (stop_pipe[0])
-#define newpollfd(FD) \
-	(struct pollfd){.fd = FD, .events = POLLIN | POLLERR, .revents = 0};
+#define newpollfd(FD) (pollfd{.fd = FD, .events = POLLIN | POLLERR, .revents = 0})
 
 FD_ABSTRACT_UART::FD_ABSTRACT_UART(sc_core::sc_module_name name, uint32_t irqsrc) : UART_IF(name, irqsrc) {
 	stop = false;

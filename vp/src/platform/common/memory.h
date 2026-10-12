@@ -2,11 +2,11 @@
 #define RISCV_ISA_MEMORY_H
 
 #include <stdint.h>
-#include <boost/iostreams/device/mapped_file.hpp>
 #include <iostream>
 
 #include "bus.h"
 #include "load_if.h"
+#include "util/mapped_file.h"
 
 #include <tlm_utils/simple_target_socket.h>
 #include <systemc>
@@ -40,7 +40,7 @@ struct SimpleMemory : public sc_core::sc_module, public load_if {
 	}
 
 	void load_binary_file(const std::string &filename, unsigned addr) {
-		boost::iostreams::mapped_file_source f(filename);
+		MappedFile f(filename);
 		assert(f.is_open());
 		write_data(addr, (const uint8_t *)f.data(), f.size());
 	}

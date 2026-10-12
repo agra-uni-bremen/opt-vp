@@ -148,8 +148,10 @@ void FU540_PLIC::write_hartctx(RegisterRange::WriteInfo t, unsigned int hart, Pr
 			thr = &hart_context[hart]->s_mode[0];
 			break;
 		default:
+			// a release build has no assert, and without the return it would write through an
+			// uninitialized pointer
 			assert(0);
-			break;
+			return;
 		}
 
 		*thr = std::min(*thr, uint32_t(MAX_THR));

@@ -25,8 +25,6 @@ public:
 	FU540_PLIC(sc_core::sc_module_name, unsigned harts = 5);
 	void gateway_trigger_interrupt(uint32_t);
 
-	SC_HAS_PROCESS(FU540_PLIC);
-
 private:
 	class HartConfig {
 	  public:

@@ -1,10 +1,28 @@
-﻿---
+---
+# Format changed lines only, before a commit:
+#   git clang-format
+# Tested with clang-format 18.
+Language: Cpp
 BasedOnStyle: Google
-ColumnLimit: '120'
-AllowShortCaseLabelsOnASingleLine: 'false'
-AllowShortFunctionsOnASingleLine: Empty
-AllowShortIfStatementsOnASingleLine: 'false'
-IndentWidth: '4'
-TabWidth: '4'
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
 UseTab: ForIndentation
+AccessModifierOffset: -4
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+# 78 percent of the declarations write `type *name`. Google derives the alignment per file.
+DerivePointerAlignment: false
+PointerAlignment: Right
+# Keep the include groups and their order as written. Some headers depend on what an earlier
+# include defined.
+IncludeBlocks: Preserve
+SortIncludes: Never
+# Comments are wrapped by hand, and both `//text` and `// text` are in use.
+ReflowComments: false
+SpacesInLineCommentPrefix:
+  Minimum: 0
+  Maximum: -1
 ...

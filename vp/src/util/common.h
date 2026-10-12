@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ios>
 #include <stdexcept>
 #include <sysc/kernel/sc_ver.h>
 
@@ -26,11 +27,23 @@ inline uint32_t rv32_align_address(uint32_t addr) {
 	return addr - addr % 4;
 }
 
+// Restores the format flags of a stream when the scope ends.
+class IosFlagsSaver {
+	std::ios_base &stream;
+	std::ios_base::fmtflags flags;
+
+public:
+	explicit IosFlagsSaver(std::ios_base &stream) : stream(stream), flags(stream.flags()) {}
+	~IosFlagsSaver() {
+		stream.flags(flags);
+	}
+	IosFlagsSaver(const IosFlagsSaver &) = delete;
+	IosFlagsSaver &operator=(const IosFlagsSaver &) = delete;
+};
+
+static_assert(SC_VERSION_MAJOR >= 3, "the VP needs SystemC 3 (IEEE 1666-2023) or newer");
+
 /* Allow to provide a custom function name for a SystemC thread to avoid duplicate name warning in case the same
  * SystemC module is instantiated multiple times. */
-#if SC_VERSION_MAJOR >= 3
 #define SC_NAMED_THREAD(func, name) \
 	this->declare_thread_process(SC_MAKE_FUNC_PTR(SC_CURRENT_USER_MODULE_TYPE, func), name)
-#else
-#define SC_NAMED_THREAD(func, name) declare_thread_process(func##_handle, name, SC_CURRENT_USER_MODULE, func)
-#endif

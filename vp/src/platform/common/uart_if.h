@@ -43,8 +43,6 @@ public:
 	UART_IF(sc_core::sc_module_name, uint32_t irqsrc);
 	virtual ~UART_IF(void);
 
-	SC_HAS_PROCESS(UART_IF);	// interrupt
-
 private:
 
 	void register_access_callback(const vp::map::register_access_t &);

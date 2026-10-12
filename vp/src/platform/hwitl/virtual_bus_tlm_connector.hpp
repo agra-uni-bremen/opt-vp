@@ -37,6 +37,5 @@ struct VirtualBusMember : public sc_core::sc_module {
 
 	void transport(tlm::tlm_generic_payload &trans, sc_core::sc_time &delay);
 
-	SC_HAS_PROCESS(VirtualBusMember);
 	void interrupt_service();
 };

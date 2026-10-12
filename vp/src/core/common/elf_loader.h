@@ -1,11 +1,11 @@
 #pragma once
 
-#include <boost/iostreams/device/mapped_file.hpp>
 #include <exception>
 #include <cstdint>
 #include <vector>
 
 #include "load_if.h"
+#include "util/mapped_file.h"
 
 template <typename T>
 struct GenericElfLoader {
@@ -17,7 +17,7 @@ struct GenericElfLoader {
 	static_assert(sizeof(addr_t) == sizeof(Elf_Ehdr::e_entry), "architecture mismatch");
 
 	const char *filename;
-	boost::iostreams::mapped_file_source elf;
+	MappedFile elf;
 	const Elf_Ehdr *hdr;
 
 	struct load_executable_exception : public std::exception {

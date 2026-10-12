@@ -16,8 +16,6 @@ struct MicroRV32GPIO : public sc_core::sc_module {
 	uint8_t input = 0; // incomming, read pin values
 	uint8_t output = 0; // outgoing pin values
 
-	SC_HAS_PROCESS(MicroRV32GPIO);
-
 	MicroRV32GPIO(sc_core::sc_module_name) {
 		tsock.register_b_transport(this, &MicroRV32GPIO::transport);
 	}

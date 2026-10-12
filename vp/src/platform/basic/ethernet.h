@@ -74,8 +74,6 @@ struct EthernetDevice : public sc_core::sc_module {
 		SEND_OPERATION = 2,
 	};
 
-	SC_HAS_PROCESS(EthernetDevice);
-
 	EthernetDevice(sc_core::sc_module_name, uint32_t irq_number, uint8_t *mem, std::string clonedev);
 
 	void init_network(std::string clonedev);

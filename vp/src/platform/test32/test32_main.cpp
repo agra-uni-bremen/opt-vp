@@ -7,7 +7,7 @@
 #include "iss.h"
 #include "mem.h"
 #include "memory.h"
-#include "syscall.h"
+#include "syscall_handler.h"
 #include "platform/common/options.h"
 
 #include "gdb-mc/gdb_server.h"
@@ -15,7 +15,6 @@
 
 #include "htif.h"
 
-#include <boost/io/ios_state.hpp>
 #include <boost/program_options.hpp>
 #include <iomanip>
 #include <iostream>
@@ -72,7 +71,7 @@ void dump_test_signature(TestOptions &opt, uint8_t *mem, ELFLoader &loader) {
     auto end_sig = loader.get_end_signature_address();
 
     {
-        boost::io::ios_flags_saver ifs(std::cout);
+        IosFlagsSaver ifs(std::cout);
         std::cout << std::hex;
         std::cout << "begin_signature: " << begin_sig << std::endl;
         std::cout << "end_signature: " << end_sig << std::endl;

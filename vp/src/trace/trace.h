@@ -421,6 +421,12 @@ struct RegisterSetCounter {
 				return;
 			}
 		}
+		add_predecessor(pc);
+	}
+
+	//the vector grows rarely. Out of line, the growth code stays out of the per instruction
+	//path, where GCC inlines it in C++20 and the extra code costs about 2 percent run time.
+	[[gnu::noinline]] void add_predecessor(uint64_t pc) {
 		more_predecessors.push_back({pc, 1});
 	}
 
@@ -449,6 +455,11 @@ struct RegisterSetCounter {
 				return;
 			}
 		}
+		add_parameter(value);
+	}
+
+	//out of line for the same reason as add_predecessor
+	[[gnu::noinline]] void add_parameter(int64_t value) {
 		parameters.push_back({value, 1});
 	}
 	#endif

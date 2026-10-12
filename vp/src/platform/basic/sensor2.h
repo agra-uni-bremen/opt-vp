@@ -33,8 +33,6 @@ struct SimpleSensor2 : public sc_core::sc_module {
 
 	vp::map::LocalRouter router;
 
-	SC_HAS_PROCESS(SimpleSensor2);
-
 	SimpleSensor2(sc_core::sc_module_name, uint32_t irq_number) : irq_number(irq_number) {
 		tsock.register_b_transport(this, &SimpleSensor2::transport);
 		SC_THREAD(run);

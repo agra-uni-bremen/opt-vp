@@ -19,8 +19,6 @@ struct MicroRV32UART : public sc_core::sc_module {
 	std::queue<unsigned char> rxFifo;
 	uint8_t rxFifoDepth = 16;
 
-	SC_HAS_PROCESS(MicroRV32UART);
-
 	MicroRV32UART(sc_core::sc_module_name) {
 		tsock.register_b_transport(this, &MicroRV32UART::transport);
 		SC_THREAD(run);

@@ -55,8 +55,6 @@ struct FE310_PLIC : public sc_core::sc_module, public interrupt_gateway {
 	sc_core::sc_event e_run;
 	sc_core::sc_time clock_cycle;
 
-	SC_HAS_PROCESS(FE310_PLIC);
-
 	FE310_PLIC(sc_core::sc_module_name, PrivilegeLevel level = MachineMode) {
 		clock_cycle = sc_core::sc_time(10, sc_core::SC_NS);
 		tsock.register_b_transport(this, &FE310_PLIC::transport);

@@ -5,7 +5,7 @@
 #include "can.h"
 #include "oled/oled.hpp"
 #include "core/common/clint.h"
-#include "core/rv32/syscall.h"
+#include "core/rv32/syscall_handler.h"
 #include "elf_loader.h"
 #include "fe310_plic.h"
 #include "debug_memory.h"
@@ -23,7 +23,6 @@
 #include "gdb-mc/gdb_server.h"
 #include "gdb-mc/gdb_runner.h"
 
-#include <boost/io/ios_state.hpp>
 #include <boost/program_options.hpp>
 #include <iomanip>
 #include <iostream>

@@ -20,6 +20,8 @@
 #include <ifaddrs.h>
 #include <netdb.h>
 
+#include <vector>
+
 using namespace std;
 
 static const char IF_NAME[] = "tap0";
@@ -237,7 +239,8 @@ void EthernetDevice::init_network(std::string clonedev) {
 }
 
 void EthernetDevice::send_raw_frame() {
-	uint8_t sendbuf[send_size < 60 ? 60 : send_size];
+	std::vector<uint8_t> sendbuf_storage(send_size < 60 ? 60 : send_size);
+	uint8_t *sendbuf = sendbuf_storage.data();
 	memcpy(sendbuf, &mem[send_src - 0x80000000], send_size);
 	if (send_size < 60) {
 		memset(&sendbuf[send_size], 0, 60 - send_size);
@@ -248,7 +251,7 @@ void EthernetDevice::send_raw_frame() {
 	dump_ethernet_frame(sendbuf, send_size, true);
 	cout << endl;
 
-	struct ether_header *eh = (struct ether_header *)sendbuf;
+	[[maybe_unused]] struct ether_header *eh = (struct ether_header *)sendbuf;
 
 	assert(memcmp(eh->ether_shost, VIRTUAL_MAC_ADDRESS, ETH_ALEN) == 0);
 

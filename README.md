@@ -43,7 +43,18 @@ $ make
 ```
 will build the VP
 
-For dependencies and detailed instruction on how to build the Opt-Vp please follow the instructions from the base RISC-V VP
+The VP needs a C++20 compiler (GCC 13 and Clang 18 are tested), CMake 3.24 or newer and the
+Boost `program_options` library. SystemC 3 is a submodule and is built with the VP. On Ubuntu 24.04:
+```console
+$ sudo apt install build-essential cmake libboost-program-options-dev
+```
+For more detailed instructions, follow those of the base RISC-V VP.
+
+`vp/CMakePresets.json` has presets for other build types, such as a debug build or one with
+AddressSanitizer:
+```console
+$ cd vp && cmake --preset debug && cmake --build --preset debug
+```
 
 To uninstall/clean use
 ```console

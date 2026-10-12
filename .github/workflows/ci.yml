@@ -18,7 +18,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libboost-all-dev \
+            build-essential cmake libboost-program-options-dev \
             gcc-riscv64-unknown-elf
 
       # The trace programs are hand written assembly in the base ISA with no library calls,
@@ -35,8 +35,10 @@ jobs:
           done
           echo "${HOME}/cross" >> "${GITHUB_PATH}"
 
+      # A new compiler warning fails the build. Local builds keep warnings as warnings.
+      # A new compiler warning fails the build. Local builds keep warnings as warnings.
       - name: configure
-        run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 
       - name: build
         run: cmake --build vp/build --target essential --parallel "$(nproc)"
@@ -66,6 +68,13 @@ jobs:
         env:
           VP_BIN_DIR: ${{ github.workspace }}/vp/build/bin
 
+      # A program that cannot be loaded must end with an error that names the file.
+      - name: check that the VP reports a program it cannot load
+        if: ${{ !cancelled() }}
+        run: python3 tests/loader/check.py
+        env:
+          VP_BIN_DIR: ${{ github.workspace }}/vp/build/bin
+
       # A failed check keeps the output it produced. Upload it so the difference can be
       # looked at without reproducing the run.
       - name: keep the produced trace when the check failed
@@ -89,10 +98,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libboost-all-dev
+            build-essential cmake libboost-program-options-dev
 
+      # A new compiler warning fails the build. Local builds keep warnings as warnings.
+      # A new compiler warning fails the build. Local builds keep warnings as warnings.
       - name: configure
-        run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S vp -B vp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 
       - name: build every target
         run: cmake --build vp/build --parallel "$(nproc)"

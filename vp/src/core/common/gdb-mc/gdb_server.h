@@ -42,8 +42,6 @@ public:
 	void setBreakpoint(int, gdb_command_t *);
 	void isAlive(int, gdb_command_t *);
 
-	SC_HAS_PROCESS(GDBServer);
-
 	GDBServer(sc_core::sc_module_name,
 	          std::vector<debug_target_if*>,
 	          DebugMemoryInterface*,

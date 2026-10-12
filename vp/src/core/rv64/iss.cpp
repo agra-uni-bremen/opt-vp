@@ -1,11 +1,5 @@
 #include "iss.h"
 
-// to save *cout* format setting, see *ISS::show*
-// #include <boost/format.hpp>
-#include <boost/io/ios_state.hpp>
-// for safe down-cast
-#include <boost/lexical_cast.hpp>
-
 #include <iostream>
 #include <algorithm>
 #include <sstream>
@@ -13,6 +7,7 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <cinttypes>
 #include <cstdlib>
 
 
@@ -129,7 +124,7 @@ ISS::ISS(uint64_t hart_id, bool use_E_base_isa) : systemc_name("Core-" + std::to
 	csrs.mhartid.reg = hart_id;
 	op = Opcode::Mapping::UNDEF;
 
-	sc_core::sc_time qt = tlm::tlm_global_quantum::instance().get();
+	[[maybe_unused]] sc_core::sc_time qt = tlm::tlm_global_quantum::instance().get();
 	cycle_time = sc_core::sc_time(10, sc_core::SC_NS);
 
 	assert(qt >= cycle_time);
@@ -1466,8 +1461,8 @@ void ISS::exec_step() {
 			break;
 
 		default:
-			printf("ERROR: unsupported instruction[" BYTE_TO_BINARY_PATTERN "] at address %x", 
-              BYTE_TO_BINARY(instr.opcode()),last_pc);
+			printf("ERROR: unsupported instruction[" BYTE_TO_BINARY_PATTERN "] at address %" PRIx64,
+			       BYTE_TO_BINARY(instr.opcode()), last_pc);
 			throw std::runtime_error("unknown opcode");
 	}
 
@@ -1886,7 +1881,8 @@ bool ISS::prompt_enable_isa(uint32_t ext_mask) {
 
 bool ISS::prompt_allow_misaligned_access(uint64_t addr, bool isLoad, unsigned alignment) {
 	if (always_trap_misaligned_access) {
-		boost::io::ios_flags_saver ifs(std::cout); //flags saver guarantees restore of std::cout state after scope exit (maybe also use at other prints?)
+		//flags saver guarantees restore of std::cout state after scope exit (maybe also use at other prints?)
+		IosFlagsSaver ifs(std::cout);
 		std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
 		          << " access at 0x" << std::hex << addr << std::dec
 		          << " (alignment " << alignment << ")." << std::endl;
@@ -1895,7 +1891,7 @@ bool ISS::prompt_allow_misaligned_access(uint64_t addr, bool isLoad, unsigned al
 	if (suppress_prompts)
 		return false;
 
-	boost::io::ios_flags_saver ifs(std::cout);
+	IosFlagsSaver ifs(std::cout);
 	std::string reply;
 	static constexpr int kPromptTimeoutMs = 10000;
 	std::cout << "\x1b[1;31m[ERROR]\x1b[22;39m Misaligned " << (isLoad ? "load" : "store/amo")
@@ -2329,7 +2325,7 @@ void ISS::show() {
 	//the last windows are still in the ring buffer and have to reach their trees first
 	tracer.flush();
 
-	boost::io::ios_flags_saver ifs(std::cout);
+	IosFlagsSaver ifs(std::cout);
 	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
 	std::cout << "simulation time: " << sc_core::sc_time_stamp() << std::endl;
 	regs.show();

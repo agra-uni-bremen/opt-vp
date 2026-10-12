@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.24)
 project(riscv-vp
 	VERSION 1.2.2
 )
@@ -19,12 +19,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
-# Keep whatever the caller passed in -DCMAKE_CXX_FLAGS and only add the warnings on top.
-# Overwriting the variable silently dropped every flag given on the command line, which made
-# it impossible to build with a sanitizer or with -g.
-#   cmake -S vp -B vp/build-asan -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
-#         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+set(CMAKE_CXX_STANDARD 20)
+# Keep whatever the caller passed in -DCMAKE_CXX_FLAGS and only add the warnings on top, so a
+# sanitizer given on the command line or by a preset in CMakePresets.json stays in effect:
+#   cmake --preset asan && cmake --build --preset asan
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wpedantic ${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "-g3")
 # -DNDEBUG is what CMake puts in a Release build itself. This project overrode the variable
@@ -51,10 +49,12 @@ set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR})
 
 include(cmake/AddGitSubmodule.cmake)
 
-find_package( Boost REQUIRED COMPONENTS iostreams program_options log)
+find_package(Boost REQUIRED COMPONENTS program_options)
 
 if(USE_SYSTEM_SYSTEMC)
-	find_library(SystemC libsystemc.a)
+	# A SystemC installed with CMake provides this package. Without it, the targets link
+	# libsystemc by name and the compiler must find the headers in its default paths.
+	find_package(SystemCLanguage 3 CONFIG)
 endif()
 
 add_subdirectory(src)
@@ -88,9 +88,14 @@ add_test(NAME isa
 	COMMAND python3 check.py
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/../tests/isa")
 
+# Checks that a program the VP cannot load ends with an error that names the file.
+add_test(NAME loader
+	COMMAND python3 check.py
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/../tests/loader")
+
 set_tests_properties(gdb integration sw PROPERTIES ENVIRONMENT
 	PATH=$ENV{PATH}:${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-set_tests_properties(trace isa PROPERTIES ENVIRONMENT
+set_tests_properties(trace isa loader PROPERTIES ENVIRONMENT
 	VP_BIN_DIR=${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_tests_properties(libgdb PROPERTIES ENVIRONMENT
 	RISCV_VP_BASE=${CMAKE_CURRENT_SOURCE_DIR}/..)

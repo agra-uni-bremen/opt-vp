@@ -45,8 +45,6 @@ struct SimpleDMA : public sc_core::sc_module {
 
 	sc_core::sc_event run_event;
 
-	SC_HAS_PROCESS(SimpleDMA);
-
 	SimpleDMA(sc_core::sc_module_name, uint32_t irq_number) : irq_number(irq_number) {
 		tsock.register_b_transport(this, &SimpleDMA::transport);
 
@@ -117,7 +115,7 @@ struct SimpleDMA : public sc_core::sc_module {
 	void transport(tlm::tlm_generic_payload &trans, sc_core::sc_time &delay) {
 		auto addr = trans.get_address();
 		auto cmd = trans.get_command();
-		auto len = trans.get_data_length();
+		[[maybe_unused]] auto len = trans.get_data_length();
 		auto ptr = trans.get_data_ptr();
 
 		assert(len == 4);  // NOTE: only allow to read/write whole register

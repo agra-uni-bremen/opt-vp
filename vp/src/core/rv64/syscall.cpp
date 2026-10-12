@@ -1,4 +1,4 @@
-#include "syscall.h"
+#include "syscall_handler.h"
 
 #include <assert.h>
 #include <sys/stat.h>
@@ -9,7 +9,7 @@
 #include <iostream>
 #include <stdexcept>
 
-#include <boost/lexical_cast.hpp>
+#include "util/numeric.h"
 
 using namespace rv64;
 
@@ -95,14 +95,14 @@ int sys_gettimeofday(SyscallHandler *sys, rv64_timeval *tp, void *tzp) {
 int sys_time(SyscallHandler *sys, rv64_time_t *tloc) {
 	time_t host_ans = time(0);
 
-	rv64_time_t guest_ans = boost::lexical_cast<rv64_time_t>(host_ans);
+	rv64_time_t guest_ans = checked_cast<rv64_time_t>(host_ans);
 
 	if (tloc != 0) {
 		rv64_time_t *p = (rv64_time_t *)sys->guest_to_host_pointer(tloc);
 		*p = guest_ans;
 	}
 
-	return boost::lexical_cast<int>(guest_ans);
+	return checked_cast<int>(guest_ans);
 }
 
 namespace rv_sc {
@@ -134,7 +134,7 @@ int translateRVFlagsToHost(const int flags) {
 int sys_brk(SyscallHandler *sys, void *addr) {
 	if (addr == 0) {
 		// riscv newlib expects brk to return current heap address when zero is passed in
-		return boost::lexical_cast<int>(sys->hp);
+		return checked_cast<int>(sys->hp);
 	} else {
 		// NOTE: can also shrink again
 		auto n = (uintptr_t)addr;
@@ -144,7 +144,7 @@ int sys_brk(SyscallHandler *sys, void *addr) {
 			sys->max_heap = sys->hp;
 
 		// same for brk increase/decrease
-		return boost::lexical_cast<int>(n);
+		return checked_cast<int>(n);
 	}
 }
 
@@ -204,34 +204,34 @@ int SyscallHandler::execute_syscall(uint64_t n, uint64_t _a0, uint64_t _a1, uint
 	// NOTE: when linking with CRT, the most basic example only calls *gettimeofday* and finally *exit*
 
 	switch (n) {
-		case SYS_fstat:
+		case syscall_nr::fstat:
 			return sys_fstat(this, _a0, (rv64_stat *)_a1);
 
-		case SYS_gettimeofday:
+		case syscall_nr::gettimeofday:
 			return sys_gettimeofday(this, (rv64_timeval *)_a0, (void *)_a1);
 
-		case SYS_brk:
+		case syscall_nr::brk:
 			return sys_brk(this, (void *)_a0);
 
-		case SYS_time:
+		case syscall_nr::time:
 			return sys_time(this, (rv64_time_t *)_a0);
 
-		case SYS_write:
+		case syscall_nr::write:
 			return sys_write(this, _a0, (void *)_a1, _a2);
 
-		case SYS_read:
+		case syscall_nr::read:
 			return sys_read(this, _a0, (void *)_a1, _a2);
 
-		case SYS_lseek:
+		case syscall_nr::lseek:
 			return sys_lseek(_a0, _a1, _a2);
 
-		case SYS_open:
+		case syscall_nr::open:
 			return sys_open(this, (const char *)_a0, _a1, _a2);
 
-		case SYS_close:
+		case syscall_nr::close:
 			return sys_close(_a0);
 
-		case SYS_exit:
+		case syscall_nr::exit:
 			// If the software requested a non-zero exit code then terminate directly.
 			// Otherwise, stop the SystemC simulation and exit with a zero exit code.
 			if (_a0) exit(_a0);
@@ -239,15 +239,15 @@ int SyscallHandler::execute_syscall(uint64_t n, uint64_t _a0, uint64_t _a1, uint
 			shall_exit = true;
 			return 0;
 
-		case SYS_host_error:
+		case syscall_nr::host_error:
 			throw std::runtime_error("SYS_host_error");
 
-		case SYS_host_test_pass:
+		case syscall_nr::host_test_pass:
 			std::cout << "TEST_PASS" << std::endl;
 			shall_exit = true;
 			return 0;
 
-		case SYS_host_test_fail:
+		case syscall_nr::host_test_fail:
 			std::cout << "TEST_FAIL (testnum = " << _a0 << ")" << std::endl;
 			shall_exit = true;
 			return 0;

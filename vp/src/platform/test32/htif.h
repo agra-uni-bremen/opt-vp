@@ -8,7 +8,6 @@ struct HTIF : public sc_core::sc_module {
     uint64_t max_instrs;
     std::function<void(uint64_t)> to_host_callback;
 
-    SC_HAS_PROCESS(HTIF);
     HTIF(sc_core::sc_module_name, uint64_t *to_host, uint64_t *num_instr, uint64_t max_instrs, std::function<void(uint64_t)> to_host_callback) {
         this->to_host = to_host;
         this->num_instr = num_instr;

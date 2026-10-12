@@ -16,7 +16,7 @@
 #include "memory_mapped_file.h"
 #include "sensor.h"
 #include "sensor2.h"
-#include "syscall.h"
+#include "syscall_handler.h"
 #include "uart.h"
 #include "util/options.h"
 #include "platform/common/options.h"
@@ -24,7 +24,6 @@
 #include "gdb-mc/gdb_server.h"
 #include "gdb-mc/gdb_runner.h"
 
-#include <boost/io/ios_state.hpp>
 #include <boost/program_options.hpp>
 #include <iomanip>
 #include <iostream>
@@ -272,7 +271,7 @@ int sc_main(int argc, char **argv) {
 		auto end_sig = loader.get_end_signature_address();
 
 		{
-			boost::io::ios_flags_saver ifs(cout);
+			IosFlagsSaver ifs(cout);
 			std::cout << std::hex;
 			std::cout << "begin_signature: " << begin_sig << std::endl;
 			std::cout << "end_signature: " << end_sig << std::endl;

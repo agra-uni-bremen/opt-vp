@@ -3,7 +3,6 @@
 #include "../iss.h"
 
 #include <dlfcn.h>
-#include <boost/io/ios_state.hpp>
 #include <iomanip>
 
 std::string RISCV_TIMING_SIM_LIB = "riscv-timing-sim.so";

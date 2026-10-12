@@ -7,6 +7,41 @@ Document important changes that are directly relevant for future implementation 
 There is no need to document old behavior that is no longer relevant unless its a bugfix 
 that might affect other forks. 
 
+## 2026-10-07 - Toolchain update
+
+**Changed: SystemC 3.0.2, C++20, CMake 3.24.** The SystemC submodule is at release 3.0.2
+(IEEE 1666-2023) and the VP no longer builds against SystemC 2.3: `SC_HAS_PROCESS` is gone and
+`util/common.h` stops the build on an older SystemC. The VP is C++20. Traces and ISA results are
+unchanged, and run time with tracing is the same as with C++17. GCC 13 inlined the rarely used
+vector growth of `RegisterSetCounter` into `update_weight` in C++20, which cost 2.5 percent, so
+`add_predecessor` and `add_parameter` are out of line.
+
+**Changed: SystemC is built optimised and rebuilt after a submodule update.** The old build
+copied the SystemC sources once and compiled them without optimisation, whatever the VP's build
+type. SystemC now builds from the submodule in `<build>/systemc-build` with the VP's build type.
+`--no-trace` runs are about 14 percent faster in Release. `USE_SYSTEM_SYSTEMC=ON` uses
+SystemC's CMake package when one is installed.
+
+**Fixed: the system call header hid a C library header.** `core/rv*/syscall.h` is now
+`syscall_handler.h`. With `-I core/rv32`, the old name replaced the system `<syscall.h>`, which
+C++20 `<atomic>` includes. The newlib system call numbers are now constants in
+`rv32::syscall_nr` and `rv64::syscall_nr`. As `SYS_<name>` macros they had the names of the
+glibc macros for the host's numbers, and a file that saw both would have handled the wrong
+system calls.
+
+**Changed: Boost is down to `program_options`.** `MappedFile` (`util/mapped_file.h`) replaces
+`boost::iostreams::mapped_file_source`, `checked_cast` (`util/numeric.h`) replaces
+`boost::lexical_cast` between numbers and keeps its range check, `IosFlagsSaver`
+(`util/common.h`) replaces `boost::io::ios_flags_saver`, and `std::format` replaces
+`boost::format`. An ELF file that cannot be opened or is empty ends the run with an error that
+names it; `tests/loader/check.py` checks this.
+
+**Changed: no compiler warnings, and CI fails on a new one.** CI configures with
+`CMAKE_COMPILE_WARNING_AS_ERROR=ON`. `FU540_PLIC` no longer writes through an uninitialised
+pointer in a Release build when it decodes an invalid privilege level.
+
+**Changed: nlohmann/json 3.12.0.** The JSON output is byte identical.
+
 ## 2026-10-02 - VP Refactor
 
 **Added: the ISA test suites.** `tests/isa/check.py` builds the riscv-tests suites (a pinned

@@ -29,7 +29,6 @@ public:
 	tlm_utils::simple_target_socket<RealCLINT> tsock;
 	uint64_t update_and_get_mtime(void) override;
 
-	SC_HAS_PROCESS(RealCLINT);
 public:
 	typedef std::chrono::high_resolution_clock::time_point time_point;
 	typedef Timer::usecs usecs;
