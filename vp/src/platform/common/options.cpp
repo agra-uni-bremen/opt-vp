@@ -64,7 +64,7 @@ void Options::add_memory_options(unsigned int &mem_start_addr, unsigned int &mem
 
 void Options::add_quiet_option(bool &quiet) {
 	add_options()
-		("quiet", po::bool_switch(&quiet), "do not output register values on exit");
+		("quiet", po::bool_switch(&quiet), "do not output register values on exit (the trace is still written)");
 }
 
 void Options::add_use_e_base_isa_option(bool &use_E_base_isa) {

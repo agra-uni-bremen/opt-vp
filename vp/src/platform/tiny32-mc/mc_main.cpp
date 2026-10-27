@@ -130,10 +130,8 @@ int sc_main(int argc, char **argv) {
 		sc_core::sc_report_handler::set_verbosity_level(sc_core::SC_NONE);
 
 	sc_core::sc_start();
-	if (!opt.quiet) {
-		core0.show();
-		core1.show();
-	}
+	core0.show(!opt.quiet);
+	core1.show(!opt.quiet);
 
 	return 0;
 }

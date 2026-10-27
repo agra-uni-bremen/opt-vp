@@ -2321,17 +2321,19 @@ void ISS::run() {
 	quantum_keeper.sync();
 }
 
-void ISS::show() {
+void ISS::show(bool registers) {
 	//the last windows are still in the ring buffer and have to reach their trees first
 	tracer.flush();
 
-	IosFlagsSaver ifs(std::cout);
-	std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
-	std::cout << "simulation time: " << sc_core::sc_time_stamp() << std::endl;
-	regs.show();
-	std::cout << "pc = " << std::hex << pc << std::endl;
-	std::cout << "num-instr = " << std::dec << csrs.instret.reg << std::endl;
-	std::cout << "==========================\n==========================\n";
+	if (registers) {
+		IosFlagsSaver ifs(std::cout);
+		std::cout << "=[ core : " << csrs.mhartid.reg << " ]===========================" << std::endl;
+		std::cout << "simulation time: " << sc_core::sc_time_stamp() << std::endl;
+		regs.show();
+		std::cout << "pc = " << std::hex << pc << std::endl;
+		std::cout << "num-instr = " << std::dec << csrs.instret.reg << std::endl;
+		std::cout << "==========================\n==========================\n";
+	}
 
 	tracer.report(csrs.instret.reg, total_num_instr, get_current_cycles(),
 	              &memory_access_map);

@@ -416,8 +416,9 @@ struct ISS : public external_interrupt_target, public clint_interrupt_target, pu
 
 	void run() override;
 
-	//! Print the register file, then hand the trees to the trace library. 
-	void show();
+	//! Print the register file unless `registers` is false, then hand the trees to the trace
+	//! library. The trace is written either way: --quiet silences the registers, not the export.
+	void show(bool registers = true);
 };
 
 /* Do not call the run function of the ISS directly but use one of the Runner

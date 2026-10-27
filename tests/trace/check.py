@@ -19,6 +19,8 @@ The digests say whether a trace changed, not whether it is right. Three more che
   which every JITR trace must satisfy;
 * a case with `"model": true` is also compared node by node against `model.py`, an
   independent implementation of the trace built from the `--trace-mode` instruction list;
+* a case with `"prints_registers": false` is not compared on the register file, which
+  `--quiet` does not print.
 * a case with `"same_as": "<case>"` must reproduce that case's reference exactly. It pins
   that a switch such as `--performance-mode` changes the speed and not the result.
 
@@ -192,11 +194,16 @@ def compare(case, entries, result):
                             f"{want!r} -> {got!r}. Re-record it with --update.")
 
     for name, want in reference["counters"].items():
+        #`retired` is read from the register dump, so a case without one has no such counter.
+        if name == "retired" and not case.get("prints_registers", True):
+            continue
         got = result["counters"].get(name)
         if got != want:
             problems.append(f"counter {name}: {want} -> {got}")
 
-    problems.extend(register_problems(reference.get("registers", []), result["registers"]))
+    #a case with "prints_registers": false runs with --quiet, which prints no register file.
+    if case.get("prints_registers", True):
+        problems.extend(register_problems(reference.get("registers", []), result["registers"]))
 
     want_files = set(reference["files"])
     got_files = set(entries)

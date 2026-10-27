@@ -159,6 +159,20 @@
    ]
   },
   {
+   "name": "quiet",
+   "comment": "--quiet silences the register file, not the export: the trace files and counters must be those of `default`.",
+   "vp": "tiny32-vp",
+   "program": "sw/trace-test-default",
+   "flags": [
+    "-e",
+    "--trace-depth",
+    "6",
+    "--quiet"
+   ],
+   "same_as": "default",
+   "prints_registers": false
+  },
+  {
    "name": "performance-mode",
    "comment": "--performance-mode raises the TLM quantum. A program that does not read the timer must produce the same trace and the same registers with it.",
    "vp": "tiny32-vp",
