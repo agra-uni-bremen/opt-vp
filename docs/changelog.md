@@ -7,6 +7,13 @@ Document important changes that are directly relevant for future implementation 
 There is no need to document old behavior that is no longer relevant unless its a bugfix 
 that might affect other forks. 
 
+## 2026-10-27 - --quiet keeps the trace
+
+**Fixed: --quiet no longer drops the JITR export.** The platforms skipped `ISS::show()` under
+`--quiet`, and `show()` is also where the trees are flushed and written, so a quiet run
+exited 0 and wrote no trace. `show(bool registers)` now prints the register file only when
+asked and always writes the trace. The trace case `quiet` pins it.
+
 ## 2026-10-07 - Toolchain update
 
 **Changed: SystemC 3.0.2, C++20, CMake 3.24.** The SystemC submodule is at release 3.0.2

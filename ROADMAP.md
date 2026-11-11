@@ -7,7 +7,7 @@ in the linked plan or study. Keep this file up-to-date.
 entry says which. `in progress`, being worked on now. `planned`, agreed but not started.
 `proposed`, an idea with a written case, not yet agreed.
 
-*Last updated: 2026-10-02.*
+*Last updated: 2026-10-07.*
 
 ## State of the repository
 The repository builds. 
@@ -19,6 +19,8 @@ Simulation and tracing of the benchmark suites all work.
 | Refactor the repository | in progress | [refactor-vp](docs/plans/refactor-vp.md) | Man refactor of the VP is done. The next target is the platform layer and a decision on how to unify rv32 vs rv64|
 | Testsuite and CI | partial | [test-suite](docs/plans/test-suite.md), [tests/trace](tests/trace/README.md), [tests/isa](tests/isa/README.md), [ci.yml](.github/workflows/ci.yml) | The riscv-tests ISA suites currently runs on `test32-vp` and `test64-vp` (238 tests, 17 known failures)|
 | Fix bugs found by the ISA suites| proposed | [tests/isa/suites.json](tests/isa/suites.json), [test-suite](docs/plans/test-suite.md) | rv64 SRLI drops the upper 32 bits (`(uint32_t)` cast in rv64 `iss.cpp`, a one line fix that also fixes C.SRLI); rv64 lacks the trigger CSRs rv32 has; FLW/FSW/FLD/FSD ignore `mstatus.FS`; a `minstret` write does not suppress its own increment; EBREAK throws in the direct runner instead of trapping; Sv32/Sv39 runs segfault in `CombinedMemoryInterface` because the DMI bounds checks are asserts. Each fix removes a known failure |
+| Modernize the toolchain | partial | [modernize-toolchain](docs/plans/modernize-toolchain.md) | SystemC 3.0.2, C++20, CMake 3.24, Boost reduced to `program_options`, nlohmann/json 3.12.0, no warnings with CI failing on a new one: done. `.clang-format` matches the code; open is the decision whether to reformat the about 3,400 lines that differ from it, or to format only changed lines with `git clang-format` |
+| Fix `OffsetSum` for addresses at or above 2^31 | proposed | `MemoryNode::register_access` in [trace.cpp](vp/src/trace/trace.cpp) | `abs((long int)(address-last_access))` resolves to `int abs(int)`, so the value is truncated to 32 bits. Clang warns with `-Wabsolute-value`. The fix changes the exported `OffsetSum` of programs that access such addresses, so it needs a reference update |
 | Unify the rv32 and rv64 ISS | next | [next-steps](docs/plans/next-steps.md) | decide how to unify the two implementations |
 | Configurable pipeline | proposed | - | would split `exec_step` by pipeline stage rather than by extension|
 | Unify the platform mains | proposed | [vp/src/platform](vp/src/platform) | `tiny32-mc`/`tiny64-mc` differ in one line, the `using namespace`, plus two whitespace hunks; `linux`/`linux32` in that line and one memory size, and their `prci.h` files are byte identical; `tiny32`/`tiny64` in that line, `rv32_align_address` against `rv64_align_address` and a commented out include. The includes are unqualified and resolve through the rv32 or rv64 target, which is why the copies came out identical, so each pair can be one source compiled twice with `-DRV_ARCH_NS=rv32/rv64`. |

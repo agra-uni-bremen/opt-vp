@@ -96,6 +96,13 @@ Use the `essential` target to only build the commonly used targets. Other target
 ```bash
 make essential
 ```
+
+The VP is C++20 and needs SystemC 3, which the submodule `vp/src/vendor/systemc` provides. CI
+builds with every warning an error, so a change must build without warnings.
+`vp/CMakePresets.json` has presets for Debug, RelWithDebInfo, AddressSanitizer and the CI build.
+A header on the include path must not have the name of a C library header: `-I` directories
+come first also for `#include <...>`, so `syscall.h` once replaced the system `<syscall.h>`.
+
 ## Running
 
 The VP supports a large number of command line options. 
@@ -131,6 +138,7 @@ Run them after changes. Together they take under ten seconds. CI runs them too.
 ```bash
 python3 tests/isa/check.py     # riscv-tests on test32-vp/test64-vp: does the VP execute correctly?
 python3 tests/trace/check.py   # trace cases: did the trace change, and are they correct?
+python3 tests/loader/check.py  # a program that cannot be loaded ends with an error that names it
 ```
 
 `tests/isa/suites.json` lists the known failures of the simulator with their reasons.
